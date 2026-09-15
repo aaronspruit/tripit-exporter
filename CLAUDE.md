@@ -98,3 +98,22 @@ it makes a request that reads that route.
 No test fixture holds a real feed URL, a real cookie, a real name, or a real
 trip. Each fixture is synthetic, built to the shape of the operator feed
 described in [docs/research.md](docs/research.md).
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs `lint` and `test`, then `build-push`, then
+`security-scan`, then `release`. A pull request stops after `build-push`: it
+pushes no image, so it loads the image into the local daemon and runs
+`tripit-exporter version` as the smoke test. The distroless image has no shell,
+so `version` is the only smoke test that the image can run.
+
+Each build carries the tag `sha-<commit>` and no version tag.
+`release-image-tags.yml` applies the version tags to that same digest when a
+person publishes the release. `latest` therefore never moves before the release
+notes exist. A `v*.*.*` tag makes a draft release that holds the notes
+template, the generated sections, and the `image-digest.txt` asset. A person
+writes the highlights and publishes the draft.
+
+Each pull request carries exactly one `changelog:` label.
+`pr-label-validation.yml` fails the pull request without it, and
+`.github/release.yml` maps the label to a section of the release notes.
