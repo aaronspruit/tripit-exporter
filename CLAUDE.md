@@ -63,3 +63,38 @@ When a later finding changes the answer, comment again. Do not leave the old
 comment standing alone. An issue that carries no comment makes the next session
 do the same research again.
 <!-- harness:rules:end -->
+
+## Commands
+
+```bash
+# Run the full test suite with coverage (coverage must stay >= 80%)
+go test -race -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# Run a single package or test
+go test ./internal/tripittest/...
+go test ./cmd/tripit-exporter/ -run TestRunVersion
+
+# Update golden files instead of comparing against them
+go test ./... -update
+
+# Format-check and lint
+test -z "$(gofmt -l .)"
+go vet ./...
+golangci-lint run
+
+# Build the image locally
+docker build -t tripit-exporter:test .
+```
+
+## Testing notes
+
+`internal/testutil.Golden(t, name, got)` compares `got` with
+`testdata/<name>.golden`. A change to the output shows up as a change to a
+golden file in the pull request diff. `internal/tripittest.New()` starts a
+fake TripIt server; a test sets the response of a route with `SetFeed` before
+it makes a request that reads that route.
+
+No test fixture holds a real feed URL, a real cookie, a real name, or a real
+trip. Each fixture is synthetic, built to the shape of the operator feed
+described in [docs/research.md](docs/research.md).

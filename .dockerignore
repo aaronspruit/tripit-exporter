@@ -1,0 +1,14 @@
+.git
+.github
+.copilot-tracking
+*_test.go
+testdata/
+data/
+.env
+.env.*
+*.md
+!README.md
+LICENSE
+.gitignore
+.dockerignore
+k8s/
