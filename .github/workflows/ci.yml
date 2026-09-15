@@ -1,0 +1,312 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.13.2
+
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -race -coverprofile=coverage.out ./...
+
+      # Reads the total from `go tool cover -func`, which prints it on the
+      # last line as e.g. "total: (statements) 83.3%".
+      - name: Enforce the coverage floor
+        run: |
+          set -euo pipefail
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          echo "Total coverage: ${total}%"
+          awk -v total="$total" 'BEGIN { exit (total < 80) }'
+
+      # go test -fuzz runs one target at a time, so this loop finds every
+      # FuzzXxx function and runs each in turn. Phase 1 has none, so the loop
+      # is a no-op until phase 2 adds the ICS fuzz targets.
+      - name: Run fuzz targets
+        run: |
+          set -euo pipefail
+          for pkg in $(go list ./...); do
+            for fn in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+              echo "Fuzzing $pkg $fn"
+              go test -run '^$' -fuzz "^${fn}\$" -fuzztime=15s "$pkg"
+            done
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.out
+
+  build-push:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4.6.0
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A version tag build embeds its version in the binary, so the image
+      # that release-image-tags.yml later re-tags (with no rebuild) already
+      # reports the right version. Every other build embeds "dev".
+      - name: Resolve the build version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # One tag only: `sha-<commit>`. No branch, semver or `latest` tag, not
+      # even on a version tag. A moving tag must not point at a build before
+      # the release notes it belongs to are published, or a deployment that
+      # tracks that tag pulls a release -- breaking changes included -- that
+      # nobody can read about yet. The version tags are applied to this same
+      # digest later, by release-image-tags.yml, once the release is published
+      # by hand. Until then the build is reachable only as `sha-<commit>`,
+      # which is what security-scan and the digest asset below refer to.
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: type=sha
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+          push: ${{ github.event_name != 'pull_request' }}
+          # Nothing is pushed on a pull request, so security-scan (which smoke
+          # tests the pushed digest) does not run there. Load into the local
+          # daemon instead so the equivalent check below still happens.
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The distroless image has no shell, so `version` is the smoke test:
+      # it proves the binary runs and reports the version it was built with.
+      # Pull requests only: on every other event the image is pushed and
+      # security-scan runs the same check on the digest.
+      - name: Smoke test the image
+        if: github.event_name == 'pull_request'
+        run: docker run --rm ${{ steps.build.outputs.imageid }} version
+
+      # On a version tag the image carries no version tag yet, so print how to
+      # pull it. This is the build to test against before publishing the draft
+      # release that gives it its version tags.
+      - name: Report how to pull the build
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Image"
+            echo
+            echo '```'
+            echo "docker pull $IMAGE@$DIGEST"
+            echo '```'
+            echo
+            echo "Also tagged:"
+            echo
+            for tag in $TAGS; do echo "- \`$tag\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-push
+    # The image is only pushed on non-PR events (see build-push), so its digest
+    # is empty on pull_request runs and Trivy cannot resolve image@<digest>.
+    if: github.event_name != 'pull_request'
+    permissions:
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Smoke test the image
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }} \
+            version
+
+      # Same filters as the gating scan below, printed to the job log. The SARIF
+      # format writes every finding to the file instead of stdout, so without
+      # this step a failure shows only "exit code 1" with no indication of which
+      # package tripped it. `exit-code: 0` keeps this step informational.
+      - name: Trivy scan (log output)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+
+      # Fails the build only on CRITICAL/HIGH vulnerabilities that have a fix
+      # available upstream. Trivy reads the Go version from the binary, so a
+      # finding here in the standard library means the go.mod toolchain line
+      # needs an update, the same way an unfixed OS package would elsewhere.
+      # `limit-severities-for-sarif` is required for the SARIF upload to honour
+      # `severity`; without it the action reports every severity to code
+      # scanning regardless of this filter.
+      - name: Trivy scan (gate + SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: '1'
+      - uses: github/codeql-action/upload-sarif@v4.37.9
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-push, security-scan]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Hands the exact digest that security-scan passed to
+      # release-image-tags.yml, which applies the version tags to it when this
+      # draft is published. An asset rather than a line in the body, because
+      # the body is rewritten by hand before publishing.
+      - name: Record the scanned image digest
+        run: echo '${{ needs.build-push.outputs.digest }}' > image-digest.txt
+
+      # Re-cutting a tag must not quietly rewrite notes that are already out.
+      # A published release for this tag is therefore a hard failure: its notes
+      # were written by hand and, per the release policy, are never edited
+      # afterwards. An unpublished draft for the same tag is the opposite case
+      # -- an abandoned or re-cut version -- and is replaced, so the new draft
+      # gets freshly generated notes rather than an update layered over stale
+      # ones. Any highlights already typed into that draft are lost with it.
+      - name: Replace any unpublished draft for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          case "$draft" in
+            true)  echo "Deleting the existing draft for $TAG."
+                   gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes ;;
+            false) echo "::error::$TAG is already a published release. Cut a new version instead."
+                   exit 1 ;;
+            *)     echo "No existing release for $TAG." ;;
+          esac
+
+      # The notes must cover the range between RELEASES, not between git tags.
+      # Cutting v0.6.0, abandoning it and later cutting v0.6.1 leaves a v0.6.0
+      # tag that GitHub can pick as the comparison base on its own, which drops
+      # everything between v0.5.2 and v0.6.0 from the notes even though it all
+      # ships in the image. Pinning the base to the last published release
+      # keeps abandoned tags out of the decision entirely. Empty is a valid
+      # answer -- no releases yet, or the previous one's tag has since been
+      # deleted -- and hands the choice back to GitHub.
+      - name: Find the last published release
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
+          if [ -n "$tag" ] \
+            && ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::warning::The last release $tag has no tag; letting GitHub choose the base."
+            tag=""
+          fi
+          echo "Comparison base: ${tag:-<chosen by GitHub>}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # Deliberately a DRAFT. `generate_release_notes` builds the label-driven
+      # "What's Changed" sections (categories in .github/release.yml) and the
+      # template is pre-pended above them -- the API appends generated notes to
+      # a supplied body rather than replacing it. Fill in the
+      # {{RELEASE HIGHLIGHTS}} placeholder in the draft, then publish by hand.
+      # A draft notifies nobody and is not the "latest" release, so writing the
+      # highlights there is authoring the notes, not editing them after release.
+      # Publishing is also what moves the image tags -- see
+      # .github/workflows/release-image-tags.yml.
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: .github/release-notes-template.md
+          generate_release_notes: true
+          previous_tag: ${{ steps.previous.outputs.tag }}
+          draft: true
+          prerelease: ${{ contains(github.ref, '-') }}
+          files: image-digest.txt
