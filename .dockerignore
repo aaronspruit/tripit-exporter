@@ -11,4 +11,3 @@ data/
 LICENSE
 .gitignore
 .dockerignore
-k8s/

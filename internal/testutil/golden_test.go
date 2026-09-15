@@ -3,6 +3,7 @@ package testutil
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,11 +11,19 @@ func TestGoldenMatch(t *testing.T) {
 	Golden(t, "sample", []byte("hello\n"))
 }
 
-func TestGoldenMismatch(t *testing.T) {
-	fake := &testing.T{}
-	Golden(fake, "sample", []byte("bad\n"))
-	if !fake.Failed() {
-		t.Fatal("Golden() did not fail on a mismatch")
+func TestCompareGoldenMismatch(t *testing.T) {
+	err := compareGolden("sample", []byte("bad\n"))
+	if err == nil {
+		t.Fatal("compareGolden() returned no error for content that differs")
+	}
+	if !strings.Contains(err.Error(), "sample") {
+		t.Errorf("error = %q, want it to name the golden file", err)
+	}
+}
+
+func TestCompareGoldenMissingFile(t *testing.T) {
+	if err := compareGolden("absent", []byte("hello\n")); err == nil {
+		t.Fatal("compareGolden() returned no error for a golden file that does not exist")
 	}
 }
 
