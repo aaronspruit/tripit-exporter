@@ -103,24 +103,21 @@ jobs:
             echo "value=dev" >> "$GITHUB_OUTPUT"
           fi
 
-      # Deliberately no semver or `latest` tags, not even on a version tag.
-      # `latest` must not move before the release notes it belongs to are
-      # published, or a deployment that tracks `latest` pulls a release --
-      # breaking changes included -- that nobody can read about yet. The
-      # version tags are applied to this same digest later, by
-      # release-image-tags.yml, once the release is published by hand. Until
-      # then the build is reachable only as `sha-<commit>`, which is what
-      # security-scan and the digest asset below refer to.
+      # One tag only: `sha-<commit>`. No branch, semver or `latest` tag, not
+      # even on a version tag. A moving tag must not point at a build before
+      # the release notes it belongs to are published, or a deployment that
+      # tracks that tag pulls a release -- breaking changes included -- that
+      # nobody can read about yet. The version tags are applied to this same
+      # digest later, by release-image-tags.yml, once the release is published
+      # by hand. Until then the build is reachable only as `sha-<commit>`,
+      # which is what security-scan and the digest asset below refer to.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: latest=false
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha
+          tags: type=sha
 
       - name: Build and push
         id: build
