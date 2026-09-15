@@ -1,0 +1,20 @@
+# The archive and the secrets of a local run
+/data/
+.env
+.env.*
+!.env.example
+
+# Build and test output
+/tripit-exporter
+coverage.out
+
+# Local agent and editor files
+.claude/
+CLAUDE.local.md
+.vscode/
+.devcontainer/devcontainer-lock.json
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini

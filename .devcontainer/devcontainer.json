@@ -1,0 +1,74 @@
+{
+  "name": "tripit-exporter",
+  // The release image is distroless and has no shell, so the dev container
+  // uses the Go dev container image. Keep the Go minor version the same as
+  // the `go` line in go.mod.
+  "image": "mcr.microsoft.com/devcontainers/go:1.27",
+  // The image user is vscode, at UID 1000. On Linux, updateRemoteUserUID
+  // changes that UID to the UID of the host user, so the bind mounts have the
+  // correct owner.
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  // Mount the repository at its host path instead of at /workspaces/<repo>.
+  // Claude Code keys each session transcript on the working directory. A
+  // different path in the container therefore hides every session that the
+  // host recorded, and `claude --continue` starts from nothing.
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // Claude Code is an npm package. Without a Node runtime, its feature
+    // installs Node 18 from NodeSource, so this feature installs the LTS
+    // release first. The claude-code feature declares installsAfter node.
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
+    // Installs the `claude` CLI and the anthropic.claude-code VS Code
+    // extension.
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+  // Share the whole host home, at the same absolute path that it has on the
+  // host.
+  //
+  // Claude Code keeps its state in two places: the ~/.claude directory and the
+  // ~/.claude.json file beside it. That file holds the MCP servers, the enabled
+  // plugins and the trust state of each project. Claude Code writes it with an
+  // atomic rename, so a bind mount of the file alone is stale after the first
+  // write. A directory mount is the only way to share it, and the only
+  // directory that holds it is the host home.
+  //
+  // The same path on both sides also makes the absolute paths that the host
+  // writes into ~/.claude resolve here. One example is the installLocation of
+  // each plugin marketplace in plugins/known_marketplaces.json.
+  //
+  // This needs a POSIX home directory on the host: WSL, Linux or macOS. The
+  // container keeps its own shell configuration, because ${localEnv:HOME} and
+  // /home/vscode are different paths.
+  "mounts": [
+    "source=${localEnv:HOME},target=${localEnv:HOME},type=bind,consistency=cached"
+  ],
+  "containerEnv": {
+    "HOST_HOME": "${localEnv:HOME}"
+  },
+  // link-claude-home.sh points ~/.claude, ~/.agents and ~/.claude.json of
+  // vscode at the host home. The image has no golangci-lint, so the command
+  // installs it next. Keep its version the same as the version in CI.
+  "postCreateCommand": "${containerWorkspaceFolder}/.devcontainer/link-claude-home.sh && curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b \"$(go env GOPATH)/bin\" v2.13.2",
+  // A local run writes the archive to the data folder of the repository.
+  // .gitignore excludes that folder.
+  "remoteEnv": {
+    "OUTPUT_DIR": "${containerWorkspaceFolder}/data"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go", "anthropic.claude-code"],
+      "settings": {
+        "go.lintTool": "golangci-lint-v2",
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        }
+      }
+    }
+  }
+}
