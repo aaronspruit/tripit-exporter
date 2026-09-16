@@ -2,29 +2,50 @@
 
 tripit-exporter keeps a local archive of your TripIt trips: one JSON file for each trip, one ICS file for each trip, and one ICS file for all trips. A scheduled run reads the TripIt private calendar feed, and a one-time backfill reads the TripIt web API to add the older trips.
 
-## Status
-
-Phase 2 of [the plan](docs/plan.md): the scheduled feed run and the archive. `tripit-exporter` with no argument fetches the feed and updates the archive. The backfill does not exist yet.
-
 ## Set up the calendar feed
 
 1. On the TripIt website, turn on "Display individual plans within a trip" in the Calendar Feed settings. The TripIt app calls the same setting "Include detailed items".
 2. Copy the private feed URL. It has the form `https://www.tripit.com/feed/ical/private/<key>/tripit.ics`. Treat it as a credential: anyone with the URL can read your trips.
 
+## Get the image
+
+The image is `ghcr.io/aaronspruit/tripit-exporter`, for `linux/amd64`. The `latest` tag points at the newest release. To control when you upgrade, use a version tag such as `0.1.0` in place of `latest`.
+
 ## Run with Docker Compose
 
-1. Copy `.env.example` to `.env`, and set `TRIPIT_FEED_URL`.
-2. Run `docker compose run --rm tripit-exporter`.
+1. Download the Compose file, and the example environment file as `.env`:
+
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/aaronspruit/tripit-exporter/main/compose.yaml
+   curl -fsSL -o .env https://raw.githubusercontent.com/aaronspruit/tripit-exporter/main/.env.example
+   ```
+
+2. In `.env`, set `TRIPIT_FEED_URL`.
+3. Make the data folder, and give it to the container user. The container runs as UID 65532, and it cannot write to a folder that Docker makes as root.
+
+   ```bash
+   mkdir data && sudo chown 65532:65532 data
+   ```
+
+4. Run `docker compose run --rm tripit-exporter`.
 
 The archive appears under `./data`.
 
 ## Run on Kubernetes
 
-Apply [`k8s/cronjob.yaml`](k8s/cronjob.yaml). It stores the feed URL in a Secret, and it runs the container every 6 hours. Edit the image name, and pick a data volume as the file comments.
+Download [`k8s/cronjob.yaml`](k8s/cronjob.yaml). Set the feed URL in its Secret, and pick a data volume as the file comments tell you. Then apply the file. The CronJob runs the container every 6 hours.
 
 ## Run from a host crontab
 
-Build the static binary, then add a line such as this to the crontab of the user who owns the output folder:
+Copy the binary out of the image:
+
+```bash
+docker create --name tripit-exporter ghcr.io/aaronspruit/tripit-exporter:latest
+docker cp tripit-exporter:/tripit-exporter /path/to/tripit-exporter
+docker rm tripit-exporter
+```
+
+Then add a line such as this to the crontab of the user who owns the output folder:
 
 ```cron
 0 */6 * * * TRIPIT_FEED_URL=... OUTPUT_DIR=/path/to/data /path/to/tripit-exporter

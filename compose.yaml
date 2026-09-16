@@ -1,7 +1,6 @@
 services:
   tripit-exporter:
-    build:
-      context: .
+    image: ghcr.io/aaronspruit/tripit-exporter:latest
     container_name: tripit-exporter
     # The image is gcr.io/distroless/static:nonroot, which runs as UID 65532.
     user: "65532:65532"

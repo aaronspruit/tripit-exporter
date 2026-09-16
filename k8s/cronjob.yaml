@@ -53,7 +53,7 @@ spec:
             #     claimName: tripit-data-pvc
           containers:
             - name: tripit-exporter
-              image: ghcr.io/OWNER/tripit-exporter:latest
+              image: ghcr.io/aaronspruit/tripit-exporter:latest
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
