@@ -28,6 +28,7 @@ func TestFetchExitCodes(t *testing.T) {
 		{"serverError", http.StatusInternalServerError, "", 2, false},
 		{"badGateway", http.StatusBadGateway, "", 2, false},
 		{"bodyDoesNotParse", http.StatusOK, "not a calendar", 2, false},
+		{"bodyTooLarge", http.StatusOK, "BEGIN:VCALENDAR\n" + strings.Repeat("X", MaxBodySize) + "\nEND:VCALENDAR\n", 2, false},
 	}
 
 	for _, tt := range tests {

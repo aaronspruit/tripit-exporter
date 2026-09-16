@@ -202,14 +202,26 @@ func mergeEvents(archived []Event, fresh []ics.Event) []Event {
 	return merged
 }
 
+// sortEvents sorts events by DTSTART, then UID. It parses each event once,
+// before the sort, and not in the comparator.
 func sortEvents(events []Event) {
-	sort.Slice(events, func(i, j int) bool {
-		si, sj := dtStartOf(events[i]), dtStartOf(events[j])
-		if si != sj {
-			return si < sj
+	type keyed struct {
+		start string
+		event Event
+	}
+	keys := make([]keyed, len(events))
+	for i, e := range events {
+		keys[i] = keyed{start: dtStartOf(e), event: e}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].start != keys[j].start {
+			return keys[i].start < keys[j].start
 		}
-		return events[i].UID < events[j].UID
+		return keys[i].event.UID < keys[j].event.UID
 	})
+	for i, k := range keys {
+		events[i] = k.event
+	}
 }
 
 func dtStartOf(e Event) string {

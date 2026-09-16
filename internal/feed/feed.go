@@ -15,6 +15,11 @@ import (
 // Timeout is the time the fetch waits for the server to respond.
 const Timeout = 60 * time.Second
 
+// MaxBodySize is the largest response body that Fetch reads. A 90-day feed
+// is much smaller. The limit stops a very large response before it uses all
+// of the 64Mi memory limit in k8s/cronjob.yaml.
+const MaxBodySize = 8 << 20
+
 // CredentialError means the server rejected the feed URL: it is wrong or
 // revoked, and a person must copy a new one from TripIt.
 type CredentialError struct {
@@ -51,9 +56,12 @@ func Fetch(ctx context.Context, client *http.Client, feedURL string) (calendar [
 		return nil, true, nil
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodySize+1))
 	if err != nil {
 		return nil, false, redact(err, feedURL)
+	}
+	if len(body) > MaxBodySize {
+		return nil, false, fmt.Errorf("feed: response body is larger than %d bytes", MaxBodySize)
 	}
 
 	if resp.StatusCode != http.StatusOK {

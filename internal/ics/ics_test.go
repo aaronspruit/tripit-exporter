@@ -51,6 +51,13 @@ func TestParseEventsUnmatchedBegin(t *testing.T) {
 	}
 }
 
+func TestParseEventsNestedBegin(t *testing.T) {
+	data := "BEGIN:VEVENT\nUID:a\nBEGIN:VEVENT\nUID:b\nEND:VEVENT\n"
+	if _, err := ParseEvents([]byte(data)); err == nil {
+		t.Fatal("want error for BEGIN:VEVENT inside an open VEVENT")
+	}
+}
+
 func TestParseEventsUnmatchedEnd(t *testing.T) {
 	if _, err := ParseEvents([]byte("UID:a\nEND:VEVENT\n")); err == nil {
 		t.Fatal("want error for unmatched END:VEVENT")

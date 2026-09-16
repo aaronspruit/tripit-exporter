@@ -92,6 +92,9 @@ func ParseEvents(data []byte) ([]Event, error) {
 	for _, line := range lines {
 		switch {
 		case line == "BEGIN:VEVENT":
+			if current != nil {
+				return nil, fmt.Errorf("ics: BEGIN:VEVENT inside an open VEVENT")
+			}
 			current = &Event{}
 		case line == "END:VEVENT":
 			if current == nil {

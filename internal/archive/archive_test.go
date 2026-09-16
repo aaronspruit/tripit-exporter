@@ -261,6 +261,21 @@ func TestRunOrdersTripsByStartThenUUID(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsTripFileThatDoesNotParse(t *testing.T) {
+	dir := t.TempDir()
+	tripsDir := filepath.Join(dir, "trips")
+	if err := os.MkdirAll(tripsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tripsDir, "trip-a.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(dir); err == nil {
+		t.Fatal("want an error for a trip file that is not valid JSON")
+	}
+}
+
 func TestAtomicWriteFailureLeavesOldFileWhole(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "trip-1.json")
