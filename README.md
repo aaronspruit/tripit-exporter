@@ -88,7 +88,7 @@ Run the backfill once, to add the trips outside the feed window, and the structu
 2. Run `docker compose run --rm -it tripit-exporter backfill`.
 3. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
 
-The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
+The backfill sends one request each 5 seconds, two for each trip, so 200 trips take about 35 minutes. When TripIt slows it down, it shows a line and waits up to 8 minutes before it tries again. The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
 
 ## Limits
 

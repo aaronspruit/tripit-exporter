@@ -35,7 +35,14 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 
 	// TRIPIT_WEB_BASE_URL is empty in production, so the client calls the
 	// real TripIt host. A test sets it to a fake server's URL.
-	client := &tripitweb.Client{Cookie: cookie, BaseURL: env["TRIPIT_WEB_BASE_URL"], Sleep: backfillSleep}
+	client := &tripitweb.Client{
+		Cookie:  cookie,
+		BaseURL: env["TRIPIT_WEB_BASE_URL"],
+		Sleep:   backfillSleep,
+		Logf: func(format string, args ...any) {
+			_, _ = fmt.Fprintf(stdout, "tripit-exporter: "+format+"\n", args...)
+		},
+	}
 	ctx := context.Background()
 
 	// Each step writes a progress line to stdout before its first request,
@@ -75,7 +82,6 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to backfill\n", len(trips), len(todo))
 
 	for i, uuid := range todo {
-		client.Pace()
 		_, _ = fmt.Fprintf(stdout, "tripit-exporter: trip %d of %d: %s\n", i+1, len(todo), uuid)
 
 		warning, err := backfillTrip(ctx, client, archived, uuid)
@@ -162,7 +168,6 @@ func listAllTrips(ctx context.Context, client *tripitweb.Client) ([]json.RawMess
 	if err != nil {
 		return nil, err
 	}
-	client.Pace()
 	upcoming, err := client.ListTrips(ctx, "exclude_types=weather&past=false&traveler=true")
 	if err != nil {
 		return nil, err

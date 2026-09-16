@@ -171,7 +171,11 @@ different file name, so questions 1 and 2 stay open for those cases.
 
 The same run listed 191 trips, then TripIt sent a TCP reset to the detail
 request of the third trip, about 10 seconds and 12 requests after the
-first request. The client treats a reset as a rate limit.
+first request. A second run started a few minutes later. The list request
+for page 4 got no response for 60 seconds, after only 4 requests. TripIt
+therefore throttles by the requests of the last few minutes, and a stalled
+request is a second form of the same throttle. The client waits 5 seconds
+before each request, and it waits out a throttled request inside the run.
 
 ## Sources
 

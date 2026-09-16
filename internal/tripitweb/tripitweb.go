@@ -22,16 +22,22 @@ import (
 // fake server URL.
 const DefaultBaseURL = "https://www.tripit.com"
 
-// pace is the wait between two trip requests, so the backfill does not
-// trigger the rate limit that docs/research.md reports.
-const pace = 1 * time.Second
+// pace is the wait before each request after the first. TripIt reset a
+// real backfill run after about 12 requests in 10 seconds, as
+// docs/research.md records.
+const pace = 5 * time.Second
+
+// throttleWaits are the waits before each retry of a request that TripIt
+// throttled: a 429, a TCP reset, an HTTP/2 protocol error, or a request that
+// timed out. After the last retry, the request returns a *RateLimitedError.
+var throttleWaits = []time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute}
 
 // retryDelay is the wait before the one retry of a 401 response.
 const retryDelay = 5 * time.Second
 
-// requestTimeout is the time that one request waits for the full response,
-// so a stalled connection stops the run instead of hanging it. A test sets
-// a shorter value.
+// requestTimeout is the time that one request waits for the full response.
+// A stalled request counts as throttled, so it gets the retries of
+// throttleWaits. A test sets a shorter value.
 var requestTimeout = 60 * time.Second
 
 // AuthError means the server rejected the session cookie twice: once, and
@@ -42,9 +48,9 @@ func (e *AuthError) Error() string {
 	return "tripitweb: the session cookie was rejected twice, copy a new one"
 }
 
-// RateLimitedError means the server sent 429, or it ended the connection
-// with an HTTP/2 protocol error or a TCP reset. The run stops here; the next run continues from
-// the trips it already wrote.
+// RateLimitedError means that TripIt still throttled a request after every
+// wait of throttleWaits. The run stops here; the next run continues from the
+// trips it already wrote.
 type RateLimitedError struct{ cause error }
 
 func (e *RateLimitedError) Error() string {
@@ -77,6 +83,11 @@ type Client struct {
 	Cookie string
 	// Sleep replaces time.Sleep in a test, so a test never waits for real.
 	Sleep func(time.Duration)
+	// Logf, when it is not nil, gets one line before each wait for a
+	// throttled request, so an operator sees why the run is slow.
+	Logf func(format string, args ...any)
+
+	sent bool
 }
 
 func (c *Client) baseURL() string {
@@ -94,11 +105,6 @@ func (c *Client) sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
-// Pace waits the pace duration. The caller calls it between two requests
-// that it sends one after the other, for example before each trip. ListTrips
-// calls it between two pages.
-func (c *Client) Pace() { c.sleep(pace) }
-
 // Profile calls /api/v2/get/profile. It returns an *AuthError when the
 // cookie is invalid, before the caller makes any trip request.
 func (c *Client) Profile(ctx context.Context) error {
@@ -114,9 +120,6 @@ func (c *Client) ListTrips(ctx context.Context, query string) ([]json.RawMessage
 
 	var all []json.RawMessage
 	for page := 1; ; page++ {
-		if page > 1 {
-			c.Pace()
-		}
 		path := fmt.Sprintf("/api/v2/list/trip?%s&page_size=%d&page_num=%d", query, pageSize, page)
 		body, err := c.apiGet(ctx, path)
 		if err != nil {
@@ -194,11 +197,9 @@ func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 }
 
 // downloadHeaders is the fixed set of browser headers that the "Export trip
-// to calendar" download URL needs beyond the cookie, as docs/research.md
-// describes. It is a placeholder set, built from a typical Firefox request,
-// because the live test against the real account that would confirm the
-// exact required subset has not run yet; see docs/research.md open
-// questions 1 and 4.
+// to calendar" download URL needs beyond the cookie, built from a typical
+// Firefox request. docs/research.md open question 1 records what the real
+// account confirmed about this set.
 var downloadHeaders = map[string]string{
 	"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
 	"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -213,7 +214,7 @@ var downloadHeaders = map[string]string{
 
 // DownloadICS downloads the events of one trip from "Export trip to
 // calendar". name is the file name at the end of the URL; docs/research.md
-// open question 4 has not confirmed whether TripIt reads it.
+// open question 2 records what is known about it.
 func (c *Client) DownloadICS(ctx context.Context, uuid, name string) ([]byte, error) {
 	url := fmt.Sprintf("%s/trip/download/uuid/%s/%s", c.baseURL(), uuid, name)
 	body, status, err := c.get(ctx, url, downloadHeaders)
@@ -230,10 +231,40 @@ func (c *Client) DownloadICS(ctx context.Context, uuid, name string) ([]byte, er
 	}
 }
 
-// get sends one GET with the cookie and headers, and returns the body and
-// the status code. A connection that the server ends becomes a
-// *RateLimitedError, because TripIt ends a backfill run that way.
+// get sends one GET with the cookie and headers after the pace wait, and
+// returns the body and the status code. When TripIt throttles the request,
+// get waits each duration of throttleWaits in turn and sends it again.
 func (c *Client) get(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
+	for attempt := 0; ; attempt++ {
+		if c.sent {
+			c.sleep(pace)
+		}
+		c.sent = true
+
+		body, status, err := c.send(ctx, url, headers)
+		if !isThrottled(status, err) {
+			return body, status, err
+		}
+		if attempt == len(throttleWaits) {
+			if err != nil {
+				return nil, 0, &RateLimitedError{cause: err}
+			}
+			return body, status, nil
+		}
+
+		reason := fmt.Sprintf("status %d", status)
+		if err != nil {
+			reason = err.Error()
+		}
+		if c.Logf != nil {
+			c.Logf("TripIt throttled a request (%s); waiting %s, then trying again", reason, throttleWaits[attempt])
+		}
+		c.sleep(throttleWaits[attempt])
+	}
+}
+
+// send sends one GET with the cookie and headers, with no pace and no retry.
+func (c *Client) send(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
@@ -248,26 +279,25 @@ func (c *Client) get(ctx context.Context, url string, headers map[string]string)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, 0, connectionError(err)
+		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, resp.StatusCode, connectionError(err)
+		return nil, resp.StatusCode, err
 	}
 	return body, resp.StatusCode, nil
 }
 
-// connectionError turns err into a *RateLimitedError when the server ended
-// the connection: with the ERR_HTTP2_PROTOCOL_ERROR that docs/research.md
-// records, or with a TCP reset, which TripIt sent to a real backfill run
-// after a few trips.
-func connectionError(err error) error {
-	if isProtocolError(err) || errors.Is(err, syscall.ECONNRESET) {
-		return &RateLimitedError{cause: err}
+// isThrottled reports whether TripIt throttled a request. docs/research.md
+// records each form: a 429, the ERR_HTTP2_PROTOCOL_ERROR of a long run, and
+// the TCP reset and the stalled request of a real backfill run.
+func isThrottled(status int, err error) bool {
+	if err == nil {
+		return status == http.StatusTooManyRequests
 	}
-	return err
+	return isProtocolError(err) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func isProtocolError(err error) bool {

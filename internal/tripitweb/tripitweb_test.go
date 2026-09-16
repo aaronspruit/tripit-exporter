@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,8 +92,8 @@ func TestUnauthorizedRetrySucceeds(t *testing.T) {
 	if err := client.Profile(context.Background()); err != nil {
 		t.Fatalf("Profile: %v", err)
 	}
-	if len(slept) != 1 || slept[0] != retryDelay {
-		t.Fatalf("slept %v, want one wait of %v", slept, retryDelay)
+	if len(slept) != 2 || slept[0] != retryDelay || slept[1] != pace {
+		t.Fatalf("slept %v, want the retry delay %v, then the pace %v", slept, retryDelay, pace)
 	}
 }
 
@@ -170,7 +172,7 @@ func TestDownloadICSBlockedGivesDownloadError(t *testing.T) {
 	}
 }
 
-func TestStalledRequestTimesOut(t *testing.T) {
+func TestStalledRequestRetriesThenRateLimits(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -180,13 +182,18 @@ func TestStalledRequestTimesOut(t *testing.T) {
 	requestTimeout = 50 * time.Millisecond
 	defer func() { requestTimeout = old }()
 
-	client := &Client{BaseURL: s.URL}
+	var slept []time.Duration
+	client := &Client{BaseURL: s.URL, Sleep: func(d time.Duration) { slept = append(slept, d) }}
 	err := client.Profile(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Profile() error = %v, want context.DeadlineExceeded", err)
 	}
-	if ExitCode(err) != 2 {
-		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+	if ExitCode(err) != 0 {
+		t.Fatalf("ExitCode(%v) = %d, want 0", err, ExitCode(err))
+	}
+	// Each retry waits its throttle wait, then the pace.
+	if len(slept) != 2*len(throttleWaits) || slept[0] != throttleWaits[0] || slept[len(slept)-2] != throttleWaits[len(throttleWaits)-1] {
+		t.Fatalf("slept %v, want each of %v followed by the pace", slept, throttleWaits)
 	}
 }
 
@@ -210,7 +217,7 @@ func TestRateLimitedTripDetailExitsZero(t *testing.T) {
 	defer s.Close()
 	s.RateLimitTripDetail("abc")
 
-	client := &Client{BaseURL: s.URL}
+	client := &Client{BaseURL: s.URL, Sleep: func(time.Duration) {}}
 	_, err := client.GetTripDetail(context.Background(), "abc")
 	if ExitCode(err) != 0 {
 		t.Fatalf("ExitCode(%v) = %d, want 0", err, ExitCode(err))
@@ -226,8 +233,20 @@ func TestIsProtocolError(t *testing.T) {
 	}
 }
 
-func TestConnectionResetExitsZero(t *testing.T) {
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// resetServer resets the connection of the first n requests, then returns
+// 200 with an empty JSON object.
+func resetServer(t *testing.T, n int) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reset := n > 0
+		n--
+		mu.Unlock()
+		if !reset {
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			t.Errorf("Hijack: %v", err)
@@ -237,9 +256,35 @@ func TestConnectionResetExitsZero(t *testing.T) {
 		_ = conn.(*net.TCPConn).SetLinger(0)
 		_ = conn.Close()
 	}))
+}
+
+func TestConnectionResetWaitsThenSucceeds(t *testing.T) {
+	s := resetServer(t, 1)
 	defer s.Close()
 
-	client := &Client{BaseURL: s.URL}
+	var slept []time.Duration
+	var logged []string
+	client := &Client{
+		BaseURL: s.URL,
+		Sleep:   func(d time.Duration) { slept = append(slept, d) },
+		Logf:    func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+	}
+	if err := client.Profile(context.Background()); err != nil {
+		t.Fatalf("Profile: %v", err)
+	}
+	if len(slept) != 2 || slept[0] != throttleWaits[0] || slept[1] != pace {
+		t.Fatalf("slept %v, want %v, then the pace %v", slept, throttleWaits[0], pace)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "waiting 1m0s") {
+		t.Fatalf("logged %q, want one line about the wait", logged)
+	}
+}
+
+func TestConnectionResetEveryTimeExitsZero(t *testing.T) {
+	s := resetServer(t, len(throttleWaits)+1)
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Sleep: func(time.Duration) {}}
 	err := client.Profile(context.Background())
 	var rateLimitErr *RateLimitedError
 	if !errors.As(err, &rateLimitErr) {

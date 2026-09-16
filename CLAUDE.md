@@ -138,13 +138,15 @@ record what the real run did not test.
 The v2 trip object holds no numeric trip ID, so the backfill reads
 `trip_id` from the TripIt link in the downloaded trip event.
 
-The client waits 1 second between two requests that follow each other
-(`Client.Pace`): before each trip, between the two trip lists, and between
-two list pages. Each request stops after 60 seconds (`requestTimeout`), and
-the timeout exits with code `2`. The client retries a
-`401` once after 5 seconds; a second `401` becomes an `*AuthError`, and a
-`429`, an HTTP/2 protocol error or a TCP reset becomes a `*RateLimitedError`. `cmd`
-turns the first into exit code `1` and the second into exit code `0`.
+The client waits 5 seconds before each request after the first (`pace`).
+TripIt throttles in four forms: a `429`, a TCP reset, an HTTP/2 protocol
+error, or a request that passes the 60-second `requestTimeout`. On each of
+them the client waits 1, 2, 4, then 8 minutes (`throttleWaits`), writes a
+line through `Client.Logf` before each wait, and sends the same request
+again. The client retries a `401` once after 5 seconds; a second `401`
+becomes an `*AuthError`, and a request that TripIt still throttles after
+the last wait becomes a `*RateLimitedError`. `cmd` turns the first into
+exit code `1` and the second into exit code `0`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
 that trip, and skips a trip whose archived file already holds a `v2`

@@ -298,9 +298,9 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 2. The client sends the full browser header set to the download URL. The set is a fixed list in the code.
 3. A helper turns a JSON value that is an object into an array of one. Each plan list goes through it.
 4. The client removes a duplicate object by its `uuid`.
-5. The client waits 1 second between two trips, between the two trip lists, and between two list pages. Each request stops after 60 seconds.
+5. The client waits 5 seconds before each request after the first. Each request stops after 60 seconds.
 6. A `401` gets one retry after 5 seconds. A second `401` stops the run with exit code `1`.
-7. A `429`, an HTTP/2 protocol error, or a TCP reset stops the run with exit code `0`. The next run continues.
+7. A `429`, an HTTP/2 protocol error, a TCP reset, or a request that stops after 60 seconds gets a retry after 1, 2, 4, then 8 minutes. If TripIt still throttles the request, the run stops with exit code `0`, and the next run continues.
 
 ### The command
 
@@ -324,13 +324,13 @@ The fake server gains the v2 routes and the download route. It returns `403` fro
 |---|---|
 | A plan list with one object gives an array of one | Table |
 | A plan in two shared trips is stored once | Table |
-| Paging reads each page up to `max_page`, and waits the pace between two pages | Fake server |
+| Paging reads each page up to `max_page`, and waits the pace before each page after the first | Fake server |
 | A `401` then a `200` succeeds. Two `401` responses exit with `1` | Fake server |
 | A `429` in the middle exits with `0`, and the trips before it are on disk | Scenario |
 | A second run skips the trips that have `v2` and events, or `v2` and an empty download | Scenario |
 | A trip file with `v2`, no events and no `empty_download` key gets the download | Scenario |
 | A blocked download, or a calendar that does not parse, keeps `v2`, the run continues, and the next run tries the download again | Scenario |
-| A stalled request stops after the timeout with exit code `2` | Fake server |
+| A reset gets a retry after a wait. A reset or a stalled request on every retry exits with `0` | Fake server |
 | A trip UUID that is not safe as a file name gets a warning and no file | Scenario |
 | The download without the browser headers gets `403` | Fake server |
 | A backfilled trip with `in_feed: false` stays after a feed run that does not hold it | Scenario |
