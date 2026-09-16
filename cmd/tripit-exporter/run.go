@@ -26,6 +26,8 @@ func run(args []string, env map[string]string, stdin io.Reader, stdout, stderr i
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version)
 		return 0
+	case "backfill":
+		return runBackfill(env, stdin, stdout, stderr, now)
 	default:
 		_, _ = fmt.Fprintf(stderr, "tripit-exporter: unknown subcommand %q\n", args[0])
 		return 2

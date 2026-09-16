@@ -3,8 +3,11 @@
 package tripittest
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -14,8 +17,15 @@ import (
 type Server struct {
 	*httptest.Server
 
-	mu   sync.Mutex
+	mu sync.Mutex
+
 	feed feedResponse
+
+	unauthorizedRemaining int
+	trips                 []json.RawMessage
+	tripDetails           map[string]string
+	downloads             map[string]string
+	rateLimitedDetail     map[string]bool
 }
 
 type feedResponse struct {
@@ -25,7 +35,12 @@ type feedResponse struct {
 
 // New starts a fake TripIt server. The caller must call Close.
 func New() *Server {
-	s := &Server{feed: feedResponse{status: http.StatusOK}}
+	s := &Server{
+		feed:              feedResponse{status: http.StatusOK},
+		tripDetails:       make(map[string]string),
+		downloads:         make(map[string]string),
+		rateLimitedDetail: make(map[string]bool),
+	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -45,16 +60,184 @@ func (s *Server) FeedURL(key string) string {
 	return s.URL + "/feed/ical/private/" + key + "/tripit.ics"
 }
 
+// SetUnauthorizedCount makes the next n requests to a web API v2 route
+// return 401, before the server goes back to its normal responses. It
+// applies to the profile route, the list route and the detail route alike,
+// so a test can put it in front of any one of them.
+func (s *Server) SetUnauthorizedCount(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unauthorizedRemaining = n
+}
+
+// SetTrips sets the trips that the list route pages through, page_size 50
+// at a time.
+func (s *Server) SetTrips(trips []json.RawMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trips = trips
+}
+
+// SetTripDetail sets the body that the detail route returns for uuid.
+func (s *Server) SetTripDetail(uuid, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tripDetails[uuid] = body
+}
+
+// SetDownload sets the ICS body that the download route returns for uuid,
+// when the request carries a browser header.
+func (s *Server) SetDownload(uuid, ics string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.downloads[uuid] = ics
+}
+
+// RateLimitTripDetail makes the detail route return 429 for uuid, so a test
+// can put a rate limit in the middle of a backfill run.
+func (s *Server) RateLimitTripDetail(uuid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rateLimitedDetail[uuid] = true
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/feed/ical/private/") && strings.HasSuffix(r.URL.Path, "/tripit.ics") {
+	path := r.URL.Path
+
+	switch {
+	case strings.HasPrefix(path, "/feed/ical/private/") && strings.HasSuffix(path, "/tripit.ics"):
 		s.mu.Lock()
 		resp := s.feed
 		s.mu.Unlock()
 
 		w.WriteHeader(resp.status)
 		_, _ = w.Write([]byte(resp.body))
+
+	case path == "/api/v2/get/profile":
+		if s.consumeUnauthorized(w) {
+			return
+		}
+		writeJSON(w, `{"Profile":{}}`)
+
+	case path == "/api/v2/list/trip":
+		if s.consumeUnauthorized(w) {
+			return
+		}
+		s.handleList(w, r)
+
+	case strings.HasPrefix(path, "/api/v2/get/trip/uuid/"):
+		if s.consumeUnauthorized(w) {
+			return
+		}
+		s.handleDetail(w, path)
+
+	case strings.HasPrefix(path, "/trip/download/uuid/"):
+		s.handleDownload(w, r, path)
+
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// consumeUnauthorized writes a 401 and returns true when the server still
+// owes the caller an unauthorized response.
+func (s *Server) consumeUnauthorized(w http.ResponseWriter) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unauthorizedRemaining <= 0 {
+		return false
+	}
+	s.unauthorizedRemaining--
+	w.WriteHeader(http.StatusUnauthorized)
+	return true
+}
+
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+	const pageSize = 50
+
+	s.mu.Lock()
+	trips := s.trips
+	s.mu.Unlock()
+
+	pageNum, err := strconv.Atoi(r.URL.Query().Get("page_num"))
+	if err != nil || pageNum < 1 {
+		pageNum = 1
+	}
+
+	maxPage := (len(trips) + pageSize - 1) / pageSize
+	if maxPage == 0 {
+		maxPage = 1
+	}
+
+	start := (pageNum - 1) * pageSize
+	end := start + pageSize
+	if start > len(trips) {
+		start = len(trips)
+	}
+	if end > len(trips) {
+		end = len(trips)
+	}
+
+	writeJSONValue(w, map[string]any{
+		"page_num":  pageNum,
+		"page_size": pageSize,
+		"max_page":  maxPage,
+		"Trip":      trips[start:end],
+	})
+}
+
+func (s *Server) handleDetail(w http.ResponseWriter, path string) {
+	uuid := strings.TrimPrefix(path, "/api/v2/get/trip/uuid/")
+	if i := strings.IndexByte(uuid, '/'); i >= 0 {
+		uuid = uuid[:i]
+	}
+
+	s.mu.Lock()
+	rateLimited := s.rateLimitedDetail[uuid]
+	body, ok := s.tripDetails[uuid]
+	s.mu.Unlock()
+	if rateLimited {
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	writeJSON(w, body)
+}
+
+// handleDownload returns 403 when the request has no browser header, as
+// TripIt does. Referer is the discriminator: a bare HTTP client does not
+// send one, and the fixed browser header set in internal/tripitweb does.
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, path string) {
+	if r.Header.Get("Referer") == "" {
+		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
-	http.NotFound(w, r)
+	uuid := strings.TrimPrefix(path, "/trip/download/uuid/")
+	if i := strings.IndexByte(uuid, '/'); i >= 0 {
+		uuid = uuid[:i]
+	}
+
+	s.mu.Lock()
+	ics, ok := s.downloads[uuid]
+	s.mu.Unlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	_, _ = fmt.Fprint(w, ics)
+}
+
+func writeJSON(w http.ResponseWriter, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprint(w, body)
+}
+
+func writeJSONValue(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }

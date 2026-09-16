@@ -66,7 +66,7 @@ A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority ov
 data/
 ├── tripit.ics              the events of every trip in the archive
 └── trips/
-    ├── <trip uuid>.json    one trip: its events, and its v2 objects once the backfill exists
+    ├── <trip uuid>.json    one trip: its events, and its v2 objects once the backfill has read it
     └── <trip uuid>.ics     the events of one trip
 ```
 
@@ -77,12 +77,22 @@ Each run merges the feed into the archive by event `UID`, and it ignores a chang
 | Code | Reason |
 |---|---|
 | `0` | Success, or a `429` rate limit. The next run continues |
-| `1` | The feed URL is wrong or revoked. Copy a new one from TripIt |
+| `1` | The feed URL is wrong or revoked, or the backfill cookie is invalid. Get a new one |
 | `2` | Any other error |
+
+## Backfill
+
+Run the backfill once, to add the trips outside the feed window, and the structured fields of every trip:
+
+1. In a browser, sign in to TripIt. Open the developer tools, and copy the value of the session cookie.
+2. Run `docker compose run --rm -it tripit-exporter backfill`.
+3. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
+
+The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields, so it picks up where it left off.
 
 ## Limits
 
-The feed holds the last 90 days and all future trips. A plan's detail is free text; the structured fields come from the backfill, once it exists.
+The feed holds the last 90 days and all future trips. A plan's detail from the feed is free text; the structured fields come from the backfill.
 
 ## Development
 

@@ -90,7 +90,8 @@ docker build -t tripit-exporter:test .
 ## Architecture
 
 `cmd/tripit-exporter` parses the subcommand. With no subcommand, it fetches
-the feed and updates the archive; `version` prints the version.
+the feed and updates the archive; `version` prints the version; `backfill`
+runs the one-time backfill.
 
 | Package | Holds |
 |---|---|
@@ -98,6 +99,7 @@ the feed and updates the archive; `version` prints the version.
 | `internal/ics` | Reads and writes the VEVENT blocks of an ICS calendar, keeping each property as raw text |
 | `internal/feed` | Fetches the calendar feed, and maps each HTTP result to an error type |
 | `internal/archive` | Loads, merges and writes the trip files, and makes the two ICS files |
+| `internal/tripitweb` | Calls the TripIt web API v2 and the trip download URL with a session cookie |
 
 The exit code order: a feed fetch error takes the code from
 [the table](README.md#exit-codes) before the archive runs at all. An archive
@@ -123,13 +125,44 @@ Every write goes to a temporary file in the same folder, then `os.Rename`,
 and only when the SHA-256 of the new content differs from the file on disk.
 A crash before the rename leaves the old file whole.
 
+## The backfill
+
+`internal/tripitweb.Client` sends the cookie as the `Cookie` header of every
+request. A web API v2 route also gets `Accept: application/json` and
+`X-Requested-With: XMLHttpRequest`; the download URL gets a fixed set of
+browser headers instead, because TripIt returns `403` to a request without
+them. `docs/research.md` open questions 1 and 2 have not run against the
+real account yet, so the exact header set and the download file name are
+best-effort, not confirmed; an operator must run the backfill against the
+real account and update `docs/research.md` and the phase 3 issue with what
+it finds.
+
+The client waits 1 second between two trips (`Client.Pace`), and retries a
+`401` once after 5 seconds; a second `401` becomes an `*AuthError`, and a
+`429` or an HTTP/2 protocol error becomes a `*RateLimitedError`. `cmd`
+turns the first into exit code `1` and the second into exit code `0`.
+
+`cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
+that trip, and skips a trip whose archived file already holds a `v2`
+object, so a second run resumes where the first stopped. It prompts for the
+cookie on stdin and, when stdin is a terminal, turns off the echo with the
+Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists
+only in that prompt and in `Client.Cookie`; it never reaches a file, a log
+line, or an error message.
+
+`TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`
+calls. It is empty in production; a test sets it to a fake server's URL.
+
 ## Testing notes
 
 `internal/testutil.Golden(t, name, got)` compares `got` with
 `testdata/<name>.golden`. A change to the output shows up as a change to a
 golden file in the pull request diff. `internal/tripittest.New()` starts a
-fake TripIt server; a test sets the response of a route with `SetFeed` before
-it makes a request that reads that route.
+fake TripIt server; a test sets the response of a route with `SetFeed`,
+`SetTrips`, `SetTripDetail` or `SetDownload` before it makes a request that
+reads that route. The download route returns `403` when the request holds
+no `Referer` header, the way TripIt rejects a request with no browser
+header.
 
 No test fixture holds a real feed URL, a real cookie, a real name, or a real
 trip. Each fixture is synthetic, built to the shape of the operator feed

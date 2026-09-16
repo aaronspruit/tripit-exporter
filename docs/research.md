@@ -158,6 +158,17 @@ Answer these with the real account:
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
 2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
 
+Phase 3 (2026-09-16) shipped `internal/tripitweb` before this run, because
+no session cookie for the real account was available in this session. The
+client sends a fixed, best-effort set of browser headers to the download
+URL (`User-Agent`, `Accept`, `Accept-Language`, `Referer`,
+`Upgrade-Insecure-Requests` and the four `Sec-Fetch-*` headers), built from
+a typical Firefox request, and it sends `<trip uuid>.ics` as the file name.
+Both choices are untested against TripIt. An operator must run the backfill
+against the real account, record which headers the download needs and
+whether the file name matters, and update this section and the phase 3
+issue with the result.
+
 ## Sources
 
 - [TripIt API v1 documentation](https://tripit.github.io/api/doc/v1/)
