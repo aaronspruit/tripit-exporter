@@ -51,13 +51,15 @@ Then add a line such as this to the crontab of the user who owns the output fold
 0 */6 * * * TRIPIT_FEED_URL=... OUTPUT_DIR=/path/to/data /path/to/tripit-exporter
 ```
 
-## Configuration
+## Environment variables
 
-| Variable | Default | `/run/secrets` name | Description |
-|---|---|---|---|
-| `TRIPIT_FEED_URL` | none, required | `tripit_feed_url` | The private feed URL |
-| `OUTPUT_DIR` | none, required | | Folder for the archive |
-| `TRIPIT_VERBOSE` | `false` | | When `true`, the backfill shows each request and response, with the cookie values hidden |
+| Variable | Used by | Required | Default | `/run/secrets` name | Description |
+|---|---|---|---|---|---|
+| `TRIPIT_FEED_URL` | Feed run | Yes | none | `tripit_feed_url` | The private feed URL. Treat it as a credential |
+| `OUTPUT_DIR` | Feed run, backfill | Yes | none | | The folder for the archive. The Compose example sets `/data` |
+| `TRIPIT_VERBOSE` | Backfill | No | `false` | | When `true`, the backfill shows each request and response, with a timestamp. The cookie values stay hidden |
+
+The backfill reads the session cookie from its prompt, and never from an environment variable.
 
 A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority over the matching environment variable.
 
