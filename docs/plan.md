@@ -255,7 +255,7 @@ The merge follows [the rules in research.md](research.md#calendar-feed). The pla
 ### Deployment files
 
 1. `compose.yaml` with `user: "65532:65532"` and the volume `./data:/data`.
-2. `.env.example` with `TRIPIT_FEED_URL` and `OUTPUT_DIR=/data`.
+2. `.env.example` with `TRIPIT_FEED_URL`. `OUTPUT_DIR` defaults to `/data`.
 3. `k8s/cronjob.yaml`, copied from garmin-activities-download. It has a Secret for the feed URL and no token volume. The schedule is every 6 hours. TripIt refreshes the feed every 15 minutes, and a trip changes less often than that.
 
 ### Tests

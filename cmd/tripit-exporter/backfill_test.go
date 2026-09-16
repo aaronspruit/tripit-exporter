@@ -387,18 +387,6 @@ func TestBackfilledTripStaysAfterFeedRunThatDoesNotHoldIt(t *testing.T) {
 	}
 }
 
-func TestBackfillMissingOutputDir(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"backfill"}, nil, strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
-
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
-	}
-	if !strings.Contains(stderr.String(), "OUTPUT_DIR") {
-		t.Fatalf("stderr = %q, want it to name OUTPUT_DIR", stderr.String())
-	}
-}
-
 func TestReadCookieEmptyIsError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": t.TempDir()},

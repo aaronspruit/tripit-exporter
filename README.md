@@ -56,7 +56,7 @@ Then add a line such as this to the crontab of the user who owns the output fold
 | Variable | Used by | Required | Default | `/run/secrets` name | Description |
 |---|---|---|---|---|---|
 | `TRIPIT_FEED_URL` | Feed run | Yes | none | `tripit_feed_url` | The private feed URL. Treat it as a credential |
-| `OUTPUT_DIR` | Feed run, backfill | Yes | none | | The folder for the archive. The Compose example sets `/data` |
+| `OUTPUT_DIR` | Feed run, backfill | No | `/data` | | The folder for the archive |
 | `TRIPIT_VERBOSE` | Backfill | No | `false` | | When `true`, the backfill shows each request and response, with a timestamp. The cookie values stay hidden |
 
 The backfill reads the session cookie from its prompt, and never from an environment variable.

@@ -34,19 +34,27 @@ func run(args []string, env map[string]string, stdin io.Reader, stdout, stderr i
 	}
 }
 
+// defaultOutputDir is the archive folder when OUTPUT_DIR is empty. The
+// Compose file and the CronJob mount the archive volume there.
+const defaultOutputDir = "/data"
+
+// outputDir returns env["OUTPUT_DIR"], or defaultOutputDir when it is empty.
+func outputDir(env map[string]string) string {
+	if dir := env["OUTPUT_DIR"]; dir != "" {
+		return dir
+	}
+	return defaultOutputDir
+}
+
 // runFeed fetches the TripIt calendar feed and merges it into the archive
-// under env["OUTPUT_DIR"]. See docs/plan.md for the exit code table.
+// under outputDir(env). See docs/plan.md for the exit code table.
 func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int {
 	feedURL := secret.Read("tripit_feed_url", "TRIPIT_FEED_URL", env)
 	if feedURL == "" {
 		_, _ = fmt.Fprintln(stderr, "tripit-exporter: TRIPIT_FEED_URL is required")
 		return 2
 	}
-	outputDir := env["OUTPUT_DIR"]
-	if outputDir == "" {
-		_, _ = fmt.Fprintln(stderr, "tripit-exporter: OUTPUT_DIR is required")
-		return 2
-	}
+	outputDir := outputDir(env)
 
 	calendar, rateLimited, err := feed.Fetch(context.Background(), http.DefaultClient, feedURL)
 	if err != nil {

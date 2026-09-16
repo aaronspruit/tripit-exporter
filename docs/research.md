@@ -129,7 +129,7 @@ The build makes one static binary with `CGO_ENABLED=0`. The image is `gcr.io/dis
 | Variable | Description |
 |---|---|
 | `TRIPIT_FEED_URL` | The private feed URL. It is a secret |
-| `OUTPUT_DIR` | Folder for the output files |
+| `OUTPUT_DIR` | Folder for the output files, `/data` by default |
 
 `tripit-exporter` with no argument is the scheduled run, and it reads the feed. `tripit-exporter backfill` is the one-time backfill, and it prompts for the cookie.
 

@@ -18,15 +18,11 @@ import (
 )
 
 // runBackfill reads a session cookie from stdin, then fills the archive
-// under env["OUTPUT_DIR"] with every trip of the account: the v2 objects of
+// under outputDir(env) with every trip of the account: the v2 objects of
 // each trip, and the events of a trip that the feed run has not reached
 // yet. See docs/plan.md for the exit code table.
 func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Writer, now time.Time) int {
-	outputDir := env["OUTPUT_DIR"]
-	if outputDir == "" {
-		_, _ = fmt.Fprintln(stderr, "tripit-exporter: OUTPUT_DIR is required")
-		return 2
-	}
+	outputDir := outputDir(env)
 
 	cookie, err := readCookie(stdin, stdout)
 	if err != nil {
