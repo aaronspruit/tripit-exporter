@@ -63,7 +63,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the backfill skips it\n", uuid)
 			continue
 		}
-		if trip, ok := archived[uuid]; ok && hasV2(trip) && !trip.DownloadPending {
+		if trip, ok := archived[uuid]; ok && hasV2(trip) && (len(trip.Events) > 0 || trip.EmptyDownload) {
 			continue
 		}
 
@@ -91,8 +91,9 @@ var backfillSleep func(time.Duration)
 // backfillTrip reads the v2 detail of uuid, and downloads its events when
 // the archive holds none yet. It mutates archived in place. A download that
 // fails for this trip alone, with a *tripitweb.DownloadError or a calendar
-// that does not parse, returns a warning: the trip keeps its v2 object and
-// DownloadPending. An error stops the run.
+// that does not parse, returns a warning: the trip keeps its v2 object with
+// no events, so the next run tries the download again. An error stops the
+// run.
 func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[string]*archive.Trip, uuid string) (warning, err error) {
 	detail, err := client.GetTripDetail(ctx, uuid)
 	if err != nil {
@@ -112,8 +113,7 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 		trip.TripID = id
 	}
 
-	trip.DownloadPending = len(trip.Events) == 0
-	if !trip.DownloadPending {
+	if len(trip.Events) > 0 {
 		return nil, nil
 	}
 
@@ -138,7 +138,7 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 		parsed = append(parsed, archive.Event{UID: e.UID(), ICS: string(raw)})
 	}
 	trip.Events = parsed
-	trip.DownloadPending = false
+	trip.EmptyDownload = len(parsed) == 0
 	return nil, nil
 }
 
@@ -164,7 +164,8 @@ func backfillExitCode(err error, stderr io.Writer) int {
 }
 
 // hasV2 reports whether trip already holds a v2 object. A second backfill
-// run skips a trip that holds a v2 object and no pending download.
+// run skips a trip that holds a v2 object and either events or an empty
+// download.
 func hasV2(trip *archive.Trip) bool {
 	return len(trip.V2) > 0 && string(trip.V2) != "null"
 }

@@ -147,13 +147,14 @@ turns the first into exit code `1` and the second into exit code `0`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
 that trip, and skips a trip whose archived file already holds a `v2`
-object and no `download_pending: true`, so a second run resumes where the
-first stopped. A download status other than `200` or `429` becomes a
-`*tripitweb.DownloadError`. That error, or a downloaded calendar that does
-not parse, makes the run write a warning, keep the `v2` object of that
-trip with no events and `download_pending: true`, and continue. A download
-that holds zero events clears `download_pending`, so the next run skips
-that trip. `backfillSleep` replaces the real wait in a `cmd` test. A trip UUID that
+object and either events or `empty_download: true`, so a second run
+resumes where the first stopped. A download status other than `200` or
+`429` becomes a `*tripitweb.DownloadError`. That error, or a downloaded
+calendar that does not parse, makes the run write a warning, keep the `v2`
+object of that trip with no events, and continue; the next run tries that
+download again. A download that holds zero events sets `empty_download:
+true`, so the next run skips that trip. The flag records a success and not
+a failure, so a trip file with no key gets the download. `backfillSleep` replaces the real wait in a `cmd` test. A trip UUID that
 `archive.ValidTripUUID` rejects gets a warning and no request. The backfill
 prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo with the
 Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists

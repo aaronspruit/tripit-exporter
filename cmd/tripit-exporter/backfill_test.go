@@ -177,8 +177,8 @@ func TestBackfillBlockedDownloadKeepsV2AndContinues(t *testing.T) {
 		t.Fatalf("stderr = %q, want a warning for the blocked download", stderr.String())
 	}
 	blocked := readTripFile(t, dir, "trip-a")
-	if !hasV2(&blocked) || len(blocked.Events) != 0 || !blocked.DownloadPending {
-		t.Fatalf("trip-a: v2 = %s, %d events, download_pending = %v, want the v2 object, no events and a pending download", blocked.V2, len(blocked.Events), blocked.DownloadPending)
+	if !hasV2(&blocked) || len(blocked.Events) != 0 || blocked.EmptyDownload {
+		t.Fatalf("trip-a: v2 = %s, %d events, empty_download = %v, want the v2 object, no events and no empty download", blocked.V2, len(blocked.Events), blocked.EmptyDownload)
 	}
 	if next := readTripFile(t, dir, "trip-b"); len(next.Events) != 1 {
 		t.Fatalf("trip-b has %d events, want 1: the run must continue after a blocked download", len(next.Events))
@@ -192,8 +192,33 @@ func TestBackfillBlockedDownloadKeepsV2AndContinues(t *testing.T) {
 	if code := run([]string{"backfill"}, env, strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow); code != 0 {
 		t.Fatalf("second run: exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if retried := readTripFile(t, dir, "trip-a"); len(retried.Events) != 1 || retried.DownloadPending {
-		t.Fatalf("trip-a has %d events, download_pending = %v after the second run, want 1 event and no pending download", len(retried.Events), retried.DownloadPending)
+	if retried := readTripFile(t, dir, "trip-a"); len(retried.Events) != 1 {
+		t.Fatalf("trip-a has %d events after the second run, want 1", len(retried.Events))
+	}
+}
+
+func TestBackfillRetriesTripFileWithV2AndNoEventsKey(t *testing.T) {
+	s := newBackfillServer(t, "trip-a")
+	defer s.Close()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "trips"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := `{"schema":1,"uuid":"trip-a","events":[],"v2":` + tripDetailJSON("trip-a") + `}`
+	if err := os.WriteFile(filepath.Join(dir, "trips", "trip-a.json"), []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": dir, "TRIPIT_WEB_BASE_URL": s.URL},
+		strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+	if trip := readTripFile(t, dir, "trip-a"); len(trip.Events) != 1 {
+		t.Fatalf("trip-a has %d events, want 1: a trip with v2, no events and no empty_download key must get the download", len(trip.Events))
 	}
 }
 
@@ -213,8 +238,8 @@ func TestBackfillUnparsableDownloadKeepsV2AndContinues(t *testing.T) {
 	if !strings.Contains(stderr.String(), "parse downloaded calendar for trip trip-a") {
 		t.Fatalf("stderr = %q, want a warning for the calendar that does not parse", stderr.String())
 	}
-	if bad := readTripFile(t, dir, "trip-a"); !hasV2(&bad) || len(bad.Events) != 0 || !bad.DownloadPending {
-		t.Fatalf("trip-a: %d events, download_pending = %v, want the v2 object, no events and a pending download", len(bad.Events), bad.DownloadPending)
+	if bad := readTripFile(t, dir, "trip-a"); !hasV2(&bad) || len(bad.Events) != 0 || bad.EmptyDownload {
+		t.Fatalf("trip-a: %d events, empty_download = %v, want the v2 object, no events and no empty download", len(bad.Events), bad.EmptyDownload)
 	}
 	if next := readTripFile(t, dir, "trip-b"); len(next.Events) != 1 {
 		t.Fatalf("trip-b has %d events, want 1: the run must continue after a calendar that does not parse", len(next.Events))
@@ -232,8 +257,8 @@ func TestBackfillSecondRunSkipsTripWithZeroDownloadedEvents(t *testing.T) {
 	if code := run([]string{"backfill"}, env, strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow); code != 0 {
 		t.Fatalf("first run: exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if trip := readTripFile(t, dir, "trip-a"); len(trip.Events) != 0 || trip.DownloadPending {
-		t.Fatalf("trip-a: %d events, download_pending = %v, want no events and no pending download", len(trip.Events), trip.DownloadPending)
+	if trip := readTripFile(t, dir, "trip-a"); len(trip.Events) != 0 || !trip.EmptyDownload {
+		t.Fatalf("trip-a: %d events, empty_download = %v, want no events and an empty download", len(trip.Events), trip.EmptyDownload)
 	}
 
 	// A second call to the detail route would get a 404 and stop the run.
