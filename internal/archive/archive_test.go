@@ -232,6 +232,89 @@ func TestMergeWarnsOnOrphanPlan(t *testing.T) {
 	}
 }
 
+func TestMergeReadsTripIDFromTheTripItLinkOnly(t *testing.T) {
+	trips := map[string]*Trip{}
+	tripEvent := strings.Replace(
+		tripEventICS("trip-1", "111", "20260615", "20260619", "20260620T000000Z"),
+		"DESCRIPTION:Traveler.", "DESCRIPTION:Paid=42 Traveler.", 1)
+	events, err := ics.ParseEvents(calendar(
+		tripEvent,
+		planEventICS("plan-a", "111", "20260615T120000Z", "20260615T140000Z", "20260620T000000Z", "AS123 SEA to LAX"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if warnings := Merge(trips, events, time.Now()); len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	trip := trips["trip-1"]
+	if trip.TripID != "111" {
+		t.Fatalf("TripID = %q, want %q", trip.TripID, "111")
+	}
+	if len(trip.Events) != 2 {
+		t.Fatalf("len(Events) = %d, want 2: the plan must attach to trip-1", len(trip.Events))
+	}
+}
+
+func TestMergeSkipsTripWithUnsafeUUID(t *testing.T) {
+	trips := map[string]*Trip{}
+	events, err := ics.ParseEvents(calendar(
+		tripEventICS("../../etc/cron.d/x", "111", "20260615", "20260619", "20260620T000000Z"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	warnings := Merge(trips, events, time.Now())
+	if len(warnings) != 1 {
+		t.Fatalf("len(warnings) = %d, want 1", len(warnings))
+	}
+	if len(trips) != 0 {
+		t.Fatalf("len(trips) = %d, want 0: an unsafe UUID must not become a trip", len(trips))
+	}
+}
+
+func TestRunRemovesFilesOfDeletedTrip(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+
+	cal := calendar(
+		tripEventICS("trip-1", "111", "20260615", "20260619", "20260620T000000Z"),
+		tripEventICS("trip-2", "222", "20260701", "20260705", "20260620T000000Z"),
+	)
+	if _, err := Run(dir, cal, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"trip-1.json", "trip-1.ics"} {
+		if _, err := os.Stat(filepath.Join(dir, "trips", name)); err != nil {
+			t.Fatalf("first run did not write %s: %v", name, err)
+		}
+	}
+
+	cal2 := calendar(
+		tripEventICS("trip-2", "222", "20260701", "20260705", "20260620T100000Z"),
+	)
+	if _, err := Run(dir, cal2, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"trip-1.json", "trip-1.ics"} {
+		if _, err := os.Stat(filepath.Join(dir, "trips", name)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after trip-1 left the feed inside the window (err = %v)", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trips", "trip-2.json")); err != nil {
+		t.Fatalf("trip-2.json is gone: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "tripit.ics"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "trip-1@tripit.com") {
+		t.Fatal("tripit.ics still holds trip-1")
+	}
+}
+
 func TestRunOrdersTripsByStartThenUUID(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)

@@ -99,7 +99,14 @@ func Run(dir string, calendar []byte, now time.Time) ([]string, error) {
 	return warnings, nil
 }
 
-var tripIDPattern = regexp.MustCompile(`id[=/](\d+)`)
+// tripIDPattern matches the numeric trip ID in the two TripIt link forms:
+// trip/show?id=<id> in a trip event and trip/show/id/<id> in a plan event.
+var tripIDPattern = regexp.MustCompile(`tripit\.com/trip/show(?:\?id=|/id/)(\d+)`)
+
+// tripUUIDPattern is the set of trip UUIDs that the archive accepts. The
+// UUID becomes a file name, so a UUID with a path separator or a dot must
+// never reach Write.
+var tripUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
 // Merge applies one fetch's events onto trips, following the calendar feed
 // rules of docs/research.md and docs/plan.md. It mutates trips in place and
@@ -110,6 +117,7 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 	planEvents := make(map[string][]ics.Event) // trip uuid -> plan events
 
 	var plans []ics.Event
+	var warnings []string
 	for _, e := range events {
 		uid := e.UID()
 		switch {
@@ -117,6 +125,10 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 			plans = append(plans, e)
 		case strings.HasSuffix(uid, "@tripit.com"):
 			tripUUID := strings.TrimSuffix(uid, "@tripit.com")
+			if !tripUUIDPattern.MatchString(tripUUID) {
+				warnings = append(warnings, fmt.Sprintf("trip event %q: the UUID is not safe as a file name, so the run skips it", uid))
+				continue
+			}
 			tripEvents[tripUUID] = e
 			if id := tripIDOf(e); id != "" {
 				tripIDToUUID[id] = tripUUID
@@ -124,7 +136,6 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 		}
 	}
 
-	var warnings []string
 	for _, e := range plans {
 		id := tripIDOf(e)
 		if id == "" {
