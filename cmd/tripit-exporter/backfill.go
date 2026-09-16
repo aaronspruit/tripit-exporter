@@ -39,10 +39,14 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 	client := &tripitweb.Client{Cookie: cookie, BaseURL: env["TRIPIT_WEB_BASE_URL"], Sleep: backfillSleep}
 	ctx := context.Background()
 
+	// Each step writes a progress line to stdout before its first request,
+	// so an operator can see which request a slow run waits on.
+	_, _ = fmt.Fprintln(stdout, "tripit-exporter: checking the cookie")
 	if err := client.Profile(ctx); err != nil {
 		return backfillExitCode(err, stderr)
 	}
 
+	_, _ = fmt.Fprintln(stdout, "tripit-exporter: listing the trips")
 	trips, err := listAllTrips(ctx, client)
 	if err != nil {
 		return backfillExitCode(err, stderr)
@@ -54,6 +58,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		return 2
 	}
 
+	var todo []string
 	for _, raw := range trips {
 		uuid := tripitweb.UUIDField(raw)
 		if uuid == "" {
@@ -66,8 +71,13 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		if trip, ok := archived[uuid]; ok && hasV2(trip) && (len(trip.Events) > 0 || trip.EmptyDownload) {
 			continue
 		}
+		todo = append(todo, uuid)
+	}
+	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to backfill\n", len(trips), len(todo))
 
+	for i, uuid := range todo {
 		client.Pace()
+		_, _ = fmt.Fprintf(stdout, "tripit-exporter: trip %d of %d: %s\n", i+1, len(todo), uuid)
 
 		warning, err := backfillTrip(ctx, client, archived, uuid)
 		if err != nil {
@@ -81,6 +91,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 			return 2
 		}
 	}
+	_, _ = fmt.Fprintln(stdout, "tripit-exporter: done")
 	return 0
 }
 

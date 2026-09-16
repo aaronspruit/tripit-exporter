@@ -80,6 +80,12 @@ func TestBackfillWritesTripFile(t *testing.T) {
 	if len(trip.Events) != 1 {
 		t.Fatalf("trip has %d events, want 1 from the downloaded calendar", len(trip.Events))
 	}
+
+	for _, line := range []string{"checking the cookie", "listing the trips", "1 trips, 1 to backfill", "trip 1 of 1: trip-a", "done"} {
+		if !strings.Contains(stdout.String(), line) {
+			t.Fatalf("stdout = %q, want the progress line %q", stdout.String(), line)
+		}
+	}
 }
 
 func TestBackfillNoOutputHoldsTheCookie(t *testing.T) {
