@@ -177,7 +177,12 @@ therefore throttles by the requests of the last few minutes, and a stalled
 request is a second form of the same throttle. The client waits 5 seconds
 before each request, and it waits out a throttled request inside the run.
 The client applies the Akamai `Set-Cookie` headers to its next request, as a
-browser does. A third run has not yet shown whether that reduces the throttle.
+browser does. In a third run with verbose mode, TripIt held a request with no response
+twice: after 51 and after 57 requests in the previous 10 minutes. The last
+response before each stall was a normal `200`, with no `Retry-After` and no
+rate-limit header. Each stall ended after about 3 minutes and 50 seconds. The
+limit is therefore about 50 requests in 10 minutes, and TripIt shows it only
+as a request that gets no response.
 
 ## Sources
 
