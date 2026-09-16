@@ -26,6 +26,7 @@ type Server struct {
 	tripDetails           map[string]string
 	downloads             map[string]string
 	rateLimitedDetail     map[string]bool
+	blockedDownloads      map[string]bool
 }
 
 type feedResponse struct {
@@ -40,6 +41,7 @@ func New() *Server {
 		tripDetails:       make(map[string]string),
 		downloads:         make(map[string]string),
 		rateLimitedDetail: make(map[string]bool),
+		blockedDownloads:  make(map[string]bool),
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
@@ -99,6 +101,14 @@ func (s *Server) RateLimitTripDetail(uuid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rateLimitedDetail[uuid] = true
+}
+
+// BlockDownload makes the download route return 403 for uuid, even to a
+// request with the browser headers, as TripIt does when it blocks a client.
+func (s *Server) BlockDownload(uuid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockedDownloads[uuid] = true
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
@@ -222,8 +232,13 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, path str
 	}
 
 	s.mu.Lock()
+	blocked := s.blockedDownloads[uuid]
 	ics, ok := s.downloads[uuid]
 	s.mu.Unlock()
+	if blocked {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return

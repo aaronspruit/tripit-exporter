@@ -107,7 +107,7 @@ func TestBackfillNoOutputHoldsTheCookie(t *testing.T) {
 	}
 }
 
-func TestBackfillSecondRunSkipsTripsThatHaveV2(t *testing.T) {
+func TestBackfillSecondRunSkipsTripsThatHaveV2AndEvents(t *testing.T) {
 	s := newBackfillServer(t, "trip-a")
 	defer s.Close()
 
@@ -141,6 +141,76 @@ func TestBackfillSecondRunSkipsTripsThatHaveV2(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("a second run touched a trip that already had v2")
+	}
+}
+
+func readTripFile(t *testing.T, dir, uuid string) archive.Trip {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "trips", uuid+".json"))
+	if err != nil {
+		t.Fatalf("trip file %s not written: %v", uuid, err)
+	}
+	var trip archive.Trip
+	if err := json.Unmarshal(data, &trip); err != nil {
+		t.Fatalf("parse trip file %s: %v", uuid, err)
+	}
+	return trip
+}
+
+func TestBackfillBlockedDownloadKeepsV2AndContinues(t *testing.T) {
+	s := newBackfillServer(t, "trip-a", "trip-b")
+	defer s.Close()
+	s.BlockDownload("trip-a")
+
+	dir := t.TempDir()
+	env := map[string]string{"OUTPUT_DIR": dir, "TRIPIT_WEB_BASE_URL": s.URL}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"backfill"}, env, strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "download trip trip-a: unexpected status 403") {
+		t.Fatalf("stderr = %q, want a warning for the blocked download", stderr.String())
+	}
+	blocked := readTripFile(t, dir, "trip-a")
+	if !hasV2(&blocked) || len(blocked.Events) != 0 {
+		t.Fatalf("trip-a: v2 = %s, %d events, want the v2 object and no events", blocked.V2, len(blocked.Events))
+	}
+	if next := readTripFile(t, dir, "trip-b"); len(next.Events) != 1 {
+		t.Fatalf("trip-b has %d events, want 1: the run must continue after a blocked download", len(next.Events))
+	}
+
+	// The next run tries the download of trip-a again.
+	s2 := newBackfillServer(t, "trip-a")
+	defer s2.Close()
+	env["TRIPIT_WEB_BASE_URL"] = s2.URL
+	stderr.Reset()
+	if code := run([]string{"backfill"}, env, strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow); code != 0 {
+		t.Fatalf("second run: exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if retried := readTripFile(t, dir, "trip-a"); len(retried.Events) != 1 {
+		t.Fatalf("trip-a has %d events after the second run, want 1", len(retried.Events))
+	}
+}
+
+func TestBackfillSkipsUnsafeUUID(t *testing.T) {
+	s := newBackfillServer(t, "../evil")
+	defer s.Close()
+
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": dir, "TRIPIT_WEB_BASE_URL": s.URL},
+		strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not safe as a file name") {
+		t.Fatalf("stderr = %q, want a warning for the unsafe UUID", stderr.String())
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "trips")); len(entries) != 0 {
+		t.Fatalf("trips holds %d files, want none", len(entries))
 	}
 }
 

@@ -144,7 +144,11 @@ turns the first into exit code `1` and the second into exit code `0`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
 that trip, and skips a trip whose archived file already holds a `v2`
-object, so a second run resumes where the first stopped. It prompts for the
+object and events, so a second run resumes where the first stopped. A
+download status other than `200` or `429` becomes a
+`*tripitweb.DownloadError`: the run writes a warning, keeps the `v2`
+object of that trip with no events, and continues. A trip UUID that
+`archive.ValidTripUUID` rejects gets a warning and no request. It prompts for the
 cookie on stdin and, when stdin is a terminal, turns off the echo with the
 Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists
 only in that prompt and in `Client.Cookie`; it never reaches a file, a log

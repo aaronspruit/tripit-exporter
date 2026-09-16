@@ -108,6 +108,9 @@ var tripIDPattern = regexp.MustCompile(`tripit\.com/trip/show(?:\?id=|/id/)(\d+)
 // never reach Write.
 var tripUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
+// ValidTripUUID reports whether uuid is safe as a trip file name.
+func ValidTripUUID(uuid string) bool { return tripUUIDPattern.MatchString(uuid) }
+
 // Merge applies one fetch's events onto trips, following the calendar feed
 // rules of docs/research.md and docs/plan.md. It mutates trips in place and
 // returns a warning for each plan event whose trip is absent from events.

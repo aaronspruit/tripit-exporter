@@ -48,7 +48,7 @@ func TestDedupeByUUIDKeepsOneOfEachSharedPlan(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("DedupeByUUID() has %d items, want 2: %v", len(got), got)
 	}
-	if uuidField(got[0]) != "a" || uuidField(got[1]) != "b" {
+	if UUIDField(got[0]) != "a" || UUIDField(got[1]) != "b" {
 		t.Fatalf("DedupeByUUID() = %v, want uuid a then uuid b", got)
 	}
 }
@@ -63,13 +63,17 @@ func TestListTripsPagesUpToMaxPage(t *testing.T) {
 	}
 	s.SetTrips(trips)
 
-	client := &Client{BaseURL: s.URL}
+	var slept []time.Duration
+	client := &Client{BaseURL: s.URL, Sleep: func(d time.Duration) { slept = append(slept, d) }}
 	got, err := client.ListTrips(context.Background(), "exclude_types=weather&past=true&traveler=all")
 	if err != nil {
 		t.Fatalf("ListTrips: %v", err)
 	}
 	if len(got) != 120 {
 		t.Fatalf("ListTrips() has %d items, want 120 (page_size 50 across 3 pages)", len(got))
+	}
+	if len(slept) != 2 || slept[0] != pace || slept[1] != pace {
+		t.Fatalf("slept %v, want one wait of %v between each two of the 3 pages", slept, pace)
 	}
 }
 
@@ -141,8 +145,26 @@ func TestDownloadICSMissingTripGivesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("DownloadICS() = nil error for a trip the server has no download for")
 	}
-	if ExitCode(err) != 2 {
-		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+	var downloadErr *DownloadError
+	if !errors.As(err, &downloadErr) || downloadErr.Status != http.StatusNotFound {
+		t.Fatalf("DownloadICS() error = %v, want a *DownloadError with status 404", err)
+	}
+}
+
+func TestDownloadICSBlockedGivesDownloadError(t *testing.T) {
+	s := tripittest.New()
+	defer s.Close()
+	s.SetDownload("abc", "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+	s.BlockDownload("abc")
+
+	client := &Client{BaseURL: s.URL}
+	_, err := client.DownloadICS(context.Background(), "abc", "abc.ics")
+	var downloadErr *DownloadError
+	if !errors.As(err, &downloadErr) || downloadErr.Status != http.StatusForbidden {
+		t.Fatalf("DownloadICS() error = %v, want a *DownloadError with status 403", err)
+	}
+	if downloadErr.Error() != "tripitweb: download trip abc: unexpected status 403" {
+		t.Fatalf("Error() = %q", downloadErr.Error())
 	}
 }
 

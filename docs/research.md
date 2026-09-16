@@ -113,7 +113,7 @@ GET https://www.tripit.com/trip/download/uuid/<trip uuid>/tripit_Jun15_to_Jun18.
 
 The operator exported the June 2026 trip on 2026-09-14 and compared it with the feed. The events were the same as the feed events: the same `UID`, `SUMMARY`, `DESCRIPTION`, times and `GEO`. Only the calendar header was different. The export adds `METHOD:PUBLISH`, puts the trip name in `X-WR-CALNAME` and `X-WR-CALDESC`, and has no `X-PUBLISHED-TTL`.
 
-The backfill therefore downloads the events of each trip from this URL, and it makes no events of its own. This also gives the check-in and check-out events, whose `UID` values are not in the v2 objects. The URL accepts a client that is not a browser only when it sends the headers of a browser (read [Web API v2](#web-api-v2)), so the backfill sends them. If TripIt blocks the download, the backfill makes the events from the v2 objects.
+The backfill therefore downloads the events of each trip from this URL, and it makes no events of its own. This also gives the check-in and check-out events, whose `UID` values are not in the v2 objects. The URL accepts a client that is not a browser only when it sends the headers of a browser (read [Web API v2](#web-api-v2)), so the backfill sends them. If TripIt blocks the download, the backfill keeps the v2 objects of the trip with no events, and phase 4 of [the plan](plan.md#phase-4-events-from-the-v2-objects) makes the events from them.
 
 ### API v1
 

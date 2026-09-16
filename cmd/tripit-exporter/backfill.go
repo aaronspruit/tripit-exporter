@@ -56,11 +56,15 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 
 	paced := false
 	for _, raw := range trips {
-		uuid := uuidField(raw)
+		uuid := tripitweb.UUIDField(raw)
 		if uuid == "" {
 			continue
 		}
-		if trip, ok := archived[uuid]; ok && hasV2(trip) {
+		if !archive.ValidTripUUID(uuid) {
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the backfill skips it\n", uuid)
+			continue
+		}
+		if trip, ok := archived[uuid]; ok && hasV2(trip) && len(trip.Events) > 0 {
 			continue
 		}
 
@@ -69,7 +73,11 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		}
 		paced = true
 
-		if err := backfillTrip(ctx, client, archived, uuid); err != nil {
+		err := backfillTrip(ctx, client, archived, uuid)
+		var downloadErr *tripitweb.DownloadError
+		if errors.As(err, &downloadErr) {
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: %v; the trip file keeps its v2 object with no events, and the next backfill tries the download again\n", err)
+		} else if err != nil {
 			return backfillExitCode(err, stderr)
 		}
 		if err := archive.Write(outputDir, archived); err != nil {
@@ -81,7 +89,8 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 }
 
 // backfillTrip reads the v2 detail of uuid, and downloads its events when
-// the archive holds none yet. It mutates archived in place.
+// the archive holds none yet. It mutates archived in place, so the v2 object
+// stays in archived when the download returns an error.
 func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[string]*archive.Trip, uuid string) error {
 	detail, err := client.GetTripDetail(ctx, uuid)
 	if err != nil {
@@ -143,20 +152,10 @@ func backfillExitCode(err error, stderr io.Writer) int {
 	return tripitweb.ExitCode(err)
 }
 
-// hasV2 reports whether trip already holds a v2 object, so a second
-// backfill run skips it.
+// hasV2 reports whether trip already holds a v2 object. A second backfill
+// run skips a trip that holds a v2 object and events.
 func hasV2(trip *archive.Trip) bool {
 	return len(trip.V2) > 0 && string(trip.V2) != "null"
-}
-
-func uuidField(raw json.RawMessage) string {
-	var v struct {
-		UUID string `json:"uuid"`
-	}
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return ""
-	}
-	return v.UUID
 }
 
 // tripDates reads start_date and end_date from a trip detail response, as

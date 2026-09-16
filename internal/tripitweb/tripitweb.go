@@ -50,10 +50,20 @@ func (e *RateLimitedError) Error() string {
 
 func (e *RateLimitedError) Unwrap() error { return e.cause }
 
+// DownloadError means the download URL returned a status other than 200 or
+// 429 for one trip, for example the 403 that TripIt sends when it blocks a
+// client. It stops that trip, and not the run.
+type DownloadError struct {
+	UUID   string
+	Status int
+}
+
+func (e *DownloadError) Error() string {
+	return fmt.Sprintf("tripitweb: download trip %s: unexpected status %d", e.UUID, e.Status)
+}
+
 // Client calls the TripIt web API v2 and the download URL.
 type Client struct {
-	// HTTPClient sends each request. It defaults to http.DefaultClient.
-	HTTPClient *http.Client
 	// BaseURL replaces DefaultBaseURL in a test.
 	BaseURL string
 	// Cookie is the session cookie. The client sends it as the Cookie
@@ -61,13 +71,6 @@ type Client struct {
 	Cookie string
 	// Sleep replaces time.Sleep in a test, so a test never waits for real.
 	Sleep func(time.Duration)
-}
-
-func (c *Client) httpClient() *http.Client {
-	if c.HTTPClient != nil {
-		return c.HTTPClient
-	}
-	return http.DefaultClient
 }
 
 func (c *Client) baseURL() string {
@@ -86,7 +89,7 @@ func (c *Client) sleep(d time.Duration) {
 }
 
 // Pace waits the pace duration. The caller calls it once between two trips,
-// and not before the first trip.
+// and not before the first trip. ListTrips also calls it between two pages.
 func (c *Client) Pace() { c.sleep(pace) }
 
 // Profile calls /api/v2/get/profile. It returns an *AuthError when the
@@ -104,6 +107,9 @@ func (c *Client) ListTrips(ctx context.Context, query string) ([]json.RawMessage
 
 	var all []json.RawMessage
 	for page := 1; ; page++ {
+		if page > 1 {
+			c.Pace()
+		}
 		path := fmt.Sprintf("/api/v2/list/trip?%s&page_size=%d&page_num=%d", query, pageSize, page)
 		body, err := c.apiGet(ctx, path)
 		if err != nil {
@@ -213,7 +219,7 @@ func (c *Client) DownloadICS(ctx context.Context, uuid, name string) ([]byte, er
 	case http.StatusOK:
 		return body, nil
 	default:
-		return nil, fmt.Errorf("tripitweb: download trip %s: unexpected status %d", uuid, status)
+		return nil, &DownloadError{UUID: uuid, Status: status}
 	}
 }
 
@@ -231,7 +237,7 @@ func (c *Client) get(ctx context.Context, url string, headers map[string]string)
 		req.Header.Set(k, v)
 	}
 
-	resp, err := c.httpClient().Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if isProtocolError(err) {
 			return nil, 0, &RateLimitedError{cause: err}
@@ -288,7 +294,7 @@ func DedupeByUUID(items []json.RawMessage) []json.RawMessage {
 	seen := make(map[string]bool, len(items))
 	out := make([]json.RawMessage, 0, len(items))
 	for _, item := range items {
-		uuid := uuidField(item)
+		uuid := UUIDField(item)
 		if uuid != "" {
 			if seen[uuid] {
 				continue
@@ -300,7 +306,9 @@ func DedupeByUUID(items []json.RawMessage) []json.RawMessage {
 	return out
 }
 
-func uuidField(raw json.RawMessage) string {
+// UUIDField reads the "uuid" field of a JSON object, and returns "" when
+// the object has none.
+func UUIDField(raw json.RawMessage) string {
 	var v struct {
 		UUID string `json:"uuid"`
 	}
