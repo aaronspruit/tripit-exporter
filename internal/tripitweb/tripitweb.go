@@ -28,6 +28,11 @@ const pace = 1 * time.Second
 // retryDelay is the wait before the one retry of a 401 response.
 const retryDelay = 5 * time.Second
 
+// requestTimeout is the time that one request waits for the full response,
+// so a stalled connection stops the run instead of hanging it. A test sets
+// a shorter value.
+var requestTimeout = 60 * time.Second
+
 // AuthError means the server rejected the session cookie twice: once, and
 // again after the one retry. A person must copy a new cookie.
 type AuthError struct{}
@@ -88,8 +93,9 @@ func (c *Client) sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
-// Pace waits the pace duration. The caller calls it once between two trips,
-// and not before the first trip. ListTrips also calls it between two pages.
+// Pace waits the pace duration. The caller calls it between two requests
+// that it sends one after the other, for example before each trip. ListTrips
+// calls it between two pages.
 func (c *Client) Pace() { c.sleep(pace) }
 
 // Profile calls /api/v2/get/profile. It returns an *AuthError when the
@@ -228,6 +234,9 @@ func (c *Client) DownloadICS(ctx context.Context, uuid, name string) ([]byte, er
 // becomes a *RateLimitedError, because TripIt has been seen to end a long
 // backfill run that way.
 func (c *Client) get(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, 0, err

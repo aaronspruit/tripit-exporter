@@ -23,10 +23,17 @@ type Server struct {
 
 	unauthorizedRemaining int
 	trips                 []json.RawMessage
-	tripDetails           map[string]string
-	downloads             map[string]string
-	rateLimitedDetail     map[string]bool
-	blockedDownloads      map[string]bool
+	tripConfigs           map[string]*tripConfig
+}
+
+// tripConfig holds the responses of the detail route and the download
+// route for one trip uuid. A nil detail or download means the route
+// returns 404.
+type tripConfig struct {
+	detail      *string
+	download    *string
+	rateLimited bool
+	blocked     bool
 }
 
 type feedResponse struct {
@@ -37,11 +44,8 @@ type feedResponse struct {
 // New starts a fake TripIt server. The caller must call Close.
 func New() *Server {
 	s := &Server{
-		feed:              feedResponse{status: http.StatusOK},
-		tripDetails:       make(map[string]string),
-		downloads:         make(map[string]string),
-		rateLimitedDetail: make(map[string]bool),
-		blockedDownloads:  make(map[string]bool),
+		feed:        feedResponse{status: http.StatusOK},
+		tripConfigs: make(map[string]*tripConfig),
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
@@ -84,7 +88,7 @@ func (s *Server) SetTrips(trips []json.RawMessage) {
 func (s *Server) SetTripDetail(uuid, body string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tripDetails[uuid] = body
+	s.trip(uuid).detail = &body
 }
 
 // SetDownload sets the ICS body that the download route returns for uuid,
@@ -92,7 +96,7 @@ func (s *Server) SetTripDetail(uuid, body string) {
 func (s *Server) SetDownload(uuid, ics string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.downloads[uuid] = ics
+	s.trip(uuid).download = &ics
 }
 
 // RateLimitTripDetail makes the detail route return 429 for uuid, so a test
@@ -100,7 +104,7 @@ func (s *Server) SetDownload(uuid, ics string) {
 func (s *Server) RateLimitTripDetail(uuid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.rateLimitedDetail[uuid] = true
+	s.trip(uuid).rateLimited = true
 }
 
 // BlockDownload makes the download route return 403 for uuid, even to a
@@ -108,7 +112,18 @@ func (s *Server) RateLimitTripDetail(uuid string) {
 func (s *Server) BlockDownload(uuid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.blockedDownloads[uuid] = true
+	s.trip(uuid).blocked = true
+}
+
+// trip returns the tripConfig of uuid, and adds one when there is none. The
+// caller holds s.mu.
+func (s *Server) trip(uuid string) *tripConfig {
+	c, ok := s.tripConfigs[uuid]
+	if !ok {
+		c = &tripConfig{}
+		s.tripConfigs[uuid] = c
+	}
+	return c
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
@@ -203,18 +218,18 @@ func (s *Server) handleDetail(w http.ResponseWriter, path string) {
 	}
 
 	s.mu.Lock()
-	rateLimited := s.rateLimitedDetail[uuid]
-	body, ok := s.tripDetails[uuid]
+	c := s.trip(uuid)
+	rateLimited, body := c.rateLimited, c.detail
 	s.mu.Unlock()
 	if rateLimited {
 		w.WriteHeader(http.StatusTooManyRequests)
 		return
 	}
-	if !ok {
+	if body == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	writeJSON(w, body)
+	writeJSON(w, *body)
 }
 
 // handleDownload returns 403 when the request has no browser header, as
@@ -232,19 +247,19 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, path str
 	}
 
 	s.mu.Lock()
-	blocked := s.blockedDownloads[uuid]
-	ics, ok := s.downloads[uuid]
+	c := s.trip(uuid)
+	blocked, ics := c.blocked, c.download
 	s.mu.Unlock()
 	if blocked {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if !ok {
+	if ics == nil {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
-	_, _ = fmt.Fprint(w, ics)
+	_, _ = fmt.Fprint(w, *ics)
 }
 
 func writeJSON(w http.ResponseWriter, body string) {

@@ -36,7 +36,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 
 	// TRIPIT_WEB_BASE_URL is empty in production, so the client calls the
 	// real TripIt host. A test sets it to a fake server's URL.
-	client := &tripitweb.Client{Cookie: cookie, BaseURL: env["TRIPIT_WEB_BASE_URL"]}
+	client := &tripitweb.Client{Cookie: cookie, BaseURL: env["TRIPIT_WEB_BASE_URL"], Sleep: backfillSleep}
 	ctx := context.Background()
 
 	if err := client.Profile(ctx); err != nil {
@@ -54,7 +54,6 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		return 2
 	}
 
-	paced := false
 	for _, raw := range trips {
 		uuid := tripitweb.UUIDField(raw)
 		if uuid == "" {
@@ -64,21 +63,18 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the backfill skips it\n", uuid)
 			continue
 		}
-		if trip, ok := archived[uuid]; ok && hasV2(trip) && len(trip.Events) > 0 {
+		if trip, ok := archived[uuid]; ok && hasV2(trip) && !trip.DownloadPending {
 			continue
 		}
 
-		if paced {
-			client.Pace()
-		}
-		paced = true
+		client.Pace()
 
-		err := backfillTrip(ctx, client, archived, uuid)
-		var downloadErr *tripitweb.DownloadError
-		if errors.As(err, &downloadErr) {
-			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: %v; the trip file keeps its v2 object with no events, and the next backfill tries the download again\n", err)
-		} else if err != nil {
+		warning, err := backfillTrip(ctx, client, archived, uuid)
+		if err != nil {
 			return backfillExitCode(err, stderr)
+		}
+		if warning != nil {
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: %v; the trip file keeps its v2 object with no events, and the next backfill tries the download again\n", warning)
 		}
 		if err := archive.Write(outputDir, archived); err != nil {
 			_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
@@ -88,13 +84,19 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 	return 0
 }
 
+// backfillSleep replaces time.Sleep in the backfill client. It is nil in
+// production; a test sets it so that no test waits for real.
+var backfillSleep func(time.Duration)
+
 // backfillTrip reads the v2 detail of uuid, and downloads its events when
-// the archive holds none yet. It mutates archived in place, so the v2 object
-// stays in archived when the download returns an error.
-func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[string]*archive.Trip, uuid string) error {
+// the archive holds none yet. It mutates archived in place. A download that
+// fails for this trip alone, with a *tripitweb.DownloadError or a calendar
+// that does not parse, returns a warning: the trip keeps its v2 object and
+// DownloadPending. An error stops the run.
+func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[string]*archive.Trip, uuid string) (warning, err error) {
 	detail, err := client.GetTripDetail(ctx, uuid)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	trip, ok := archived[uuid]
@@ -110,26 +112,34 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 		trip.TripID = id
 	}
 
-	if len(trip.Events) > 0 {
-		return nil
+	trip.DownloadPending = len(trip.Events) == 0
+	if !trip.DownloadPending {
+		return nil, nil
 	}
 
 	calendar, err := client.DownloadICS(ctx, uuid, uuid+".ics")
+	var downloadErr *tripitweb.DownloadError
+	if errors.As(err, &downloadErr) {
+		return err, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	events, err := ics.ParseEvents(calendar)
 	if err != nil {
-		return fmt.Errorf("tripit-exporter: parse downloaded calendar for trip %s: %w", uuid, err)
+		return fmt.Errorf("parse downloaded calendar for trip %s: %w", uuid, err), nil
 	}
+	var parsed []archive.Event
 	for _, e := range events {
 		raw, err := ics.EventBytes(e)
 		if err != nil {
-			return fmt.Errorf("tripit-exporter: encode downloaded event for trip %s: %w", uuid, err)
+			return fmt.Errorf("encode downloaded event for trip %s: %w", uuid, err), nil
 		}
-		trip.Events = append(trip.Events, archive.Event{UID: e.UID(), ICS: string(raw)})
+		parsed = append(parsed, archive.Event{UID: e.UID(), ICS: string(raw)})
 	}
-	return nil
+	trip.Events = parsed
+	trip.DownloadPending = false
+	return nil, nil
 }
 
 // listAllTrips lists every trip of the account: the future trips the
@@ -140,6 +150,7 @@ func listAllTrips(ctx context.Context, client *tripitweb.Client) ([]json.RawMess
 	if err != nil {
 		return nil, err
 	}
+	client.Pace()
 	upcoming, err := client.ListTrips(ctx, "exclude_types=weather&past=false&traveler=true")
 	if err != nil {
 		return nil, err
@@ -153,7 +164,7 @@ func backfillExitCode(err error, stderr io.Writer) int {
 }
 
 // hasV2 reports whether trip already holds a v2 object. A second backfill
-// run skips a trip that holds a v2 object and events.
+// run skips a trip that holds a v2 object and no pending download.
 func hasV2(trip *archive.Trip) bool {
 	return len(trip.V2) > 0 && string(trip.V2) != "null"
 }

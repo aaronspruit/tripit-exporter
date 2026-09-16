@@ -137,17 +137,23 @@ best-effort, not confirmed; an operator must run the backfill against the
 real account and update `docs/research.md` and the phase 3 issue with what
 it finds.
 
-The client waits 1 second between two trips (`Client.Pace`), and retries a
+The client waits 1 second between two requests that follow each other
+(`Client.Pace`): before each trip, between the two trip lists, and between
+two list pages. Each request stops after 60 seconds (`requestTimeout`), and
+the timeout exits with code `2`. The client retries a
 `401` once after 5 seconds; a second `401` becomes an `*AuthError`, and a
 `429` or an HTTP/2 protocol error becomes a `*RateLimitedError`. `cmd`
 turns the first into exit code `1` and the second into exit code `0`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
 that trip, and skips a trip whose archived file already holds a `v2`
-object and events, so a second run resumes where the first stopped. A
-download status other than `200` or `429` becomes a
-`*tripitweb.DownloadError`: the run writes a warning, keeps the `v2`
-object of that trip with no events, and continues. A trip UUID that
+object and no `download_pending: true`, so a second run resumes where the
+first stopped. A download status other than `200` or `429` becomes a
+`*tripitweb.DownloadError`. That error, or a downloaded calendar that does
+not parse, makes the run write a warning, keep the `v2` object of that
+trip with no events and `download_pending: true`, and continue. A download
+that holds zero events clears `download_pending`, so the next run skips
+that trip. `backfillSleep` replaces the real wait in a `cmd` test. A trip UUID that
 `archive.ValidTripUUID` rejects gets a warning and no request. The backfill
 prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo with the
 Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists

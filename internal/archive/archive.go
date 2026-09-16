@@ -41,6 +41,10 @@ type Trip struct {
 	InFeed bool            `json:"in_feed"`
 	Events []Event         `json:"events"`
 	V2     json.RawMessage `json:"v2"`
+	// DownloadPending is true when the backfill read the v2 object but did
+	// not get the events of the download, so the next backfill tries the
+	// download again.
+	DownloadPending bool `json:"download_pending,omitempty"`
 }
 
 // Load reads every trip file under dir/trips. A missing dir/trips is not an

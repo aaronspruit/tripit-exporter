@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -165,6 +166,26 @@ func TestDownloadICSBlockedGivesDownloadError(t *testing.T) {
 	}
 	if downloadErr.Error() != "tripitweb: download trip abc: unexpected status 403" {
 		t.Fatalf("Error() = %q", downloadErr.Error())
+	}
+}
+
+func TestStalledRequestTimesOut(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer s.Close()
+
+	old := requestTimeout
+	requestTimeout = 50 * time.Millisecond
+	defer func() { requestTimeout = old }()
+
+	client := &Client{BaseURL: s.URL}
+	err := client.Profile(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Profile() error = %v, want context.DeadlineExceeded", err)
+	}
+	if ExitCode(err) != 2 {
+		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
 	}
 }
 

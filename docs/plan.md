@@ -298,7 +298,7 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 2. The client sends the full browser header set to the download URL. The set is a fixed list in the code.
 3. A helper turns a JSON value that is an object into an array of one. Each plan list goes through it.
 4. The client removes a duplicate object by its `uuid`.
-5. The client waits 1 second between two trips.
+5. The client waits 1 second between two trips, between the two trip lists, and between two list pages. Each request stops after 60 seconds.
 6. A `401` gets one retry after 5 seconds. A second `401` stops the run with exit code `1`.
 7. A `429`, or an HTTP/2 protocol error, stops the run with exit code `0`. The next run continues.
 
@@ -309,9 +309,9 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 1. Prompts for the cookie. If the input is a terminal, the prompt turns off the echo with the Linux `ioctl` from the `syscall` package. The cookie never goes to a file or to a log.
 2. Calls `/api/v2/get/profile`. A `401` stops the run with exit code `1` before any trip request.
 3. Lists all trips, with `past=true&traveler=all` and `past=false&traveler=true`.
-4. Skips each trip whose file already holds `v2` and events. A second run therefore continues where the first run stopped, and tries a blocked download again.
+4. Skips each trip whose file already holds `v2` and no `download_pending: true`. A second run therefore continues where the first run stopped, and tries a failed download again.
 5. Reads the detail of each other trip, and stores the response in `v2` as it was read.
-6. Downloads the ICS of a trip that has no events, and adds the events with `in_feed: false`. If the download returns a status other than `200` or `429`, the run writes a warning, keeps `v2` with no events, and continues.
+6. Downloads the ICS of a trip that has no events, and adds the events with `in_feed: false`. If the download returns a status other than `200` or `429`, or a calendar that does not parse, the run writes a warning, keeps `v2` with no events, sets `download_pending: true`, and continues.
 7. Writes each trip file when it finishes that trip, and not at the end of the run.
 
 The feed run sets `in_feed: true` on a backfilled trip when the feed holds the trip.
@@ -327,8 +327,9 @@ The fake server gains the v2 routes and the download route. It returns `403` fro
 | Paging reads each page up to `max_page`, and waits the pace between two pages | Fake server |
 | A `401` then a `200` succeeds. Two `401` responses exit with `1` | Fake server |
 | A `429` in the middle exits with `0`, and the trips before it are on disk | Scenario |
-| A second run skips the trips that have `v2` and events | Scenario |
-| A blocked download keeps `v2`, the run continues, and the next run tries the download again | Scenario |
+| A second run skips the trips that have `v2` and no pending download, also when the download held zero events | Scenario |
+| A blocked download, or a calendar that does not parse, keeps `v2`, the run continues, and the next run tries the download again | Scenario |
+| A stalled request stops after the timeout with exit code `2` | Fake server |
 | A trip UUID that is not safe as a file name gets a warning and no file | Scenario |
 | The download without the browser headers gets `403` | Fake server |
 | A backfilled trip with `in_feed: false` stays after a feed run that does not hold it | Scenario |
