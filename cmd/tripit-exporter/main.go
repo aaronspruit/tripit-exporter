@@ -4,13 +4,14 @@ package main
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {
-	os.Exit(run(os.Args[1:], environMap(os.Environ()), os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], environMap(os.Environ()), os.Stdin, os.Stdout, os.Stderr, time.Now()))
 }
 
 // environMap turns the "KEY=VALUE" slice from os.Environ into a map, so run

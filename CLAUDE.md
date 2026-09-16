@@ -87,6 +87,42 @@ golangci-lint run
 docker build -t tripit-exporter:test .
 ```
 
+## Architecture
+
+`cmd/tripit-exporter` parses the subcommand. With no subcommand, it fetches
+the feed and updates the archive; `version` prints the version.
+
+| Package | Holds |
+|---|---|
+| `internal/secret` | Reads a credential from `/run/secrets/<name>`, then from an environment variable |
+| `internal/ics` | Reads and writes the VEVENT blocks of an ICS calendar, keeping each property as raw text |
+| `internal/feed` | Fetches the calendar feed, and maps each HTTP result to an error type |
+| `internal/archive` | Loads, merges and writes the trip files, and makes the two ICS files |
+
+The exit code order: a feed fetch error takes the code from
+[the table](README.md#exit-codes) before the archive runs at all. An archive
+error, for example a disk failure, exits with `2`.
+
+## The archive
+
+A trip file holds its events and, once the backfill exists, its `v2`
+object. The merge compares an event with its archived copy and ignores
+`DTSTAMP`, so a fetch that only refreshes the timestamp writes nothing. This
+keeps a run idempotent: the archive changes only when TripIt data changes.
+
+The `in_feed` flag limits the delete rules to trips that came from the feed.
+The backfill will read trips that other travelers share, and the feed does
+not hold those, so `in_feed: false` keeps them safe from deletion.
+
+A trip absent from a fetch stays in the archive unless it ended more than 83
+days before the fetch, which the 7-day margin around the 90-day feed window
+allows for. A kept trip is a visible mistake that a person can correct; a
+deleted trip is a silent loss.
+
+Every write goes to a temporary file in the same folder, then `os.Rename`,
+and only when the SHA-256 of the new content differs from the file on disk.
+A crash before the rename leaves the old file whole.
+
 ## Testing notes
 
 `internal/testutil.Golden(t, name, got)` compares `got` with
@@ -98,6 +134,12 @@ it makes a request that reads that route.
 No test fixture holds a real feed URL, a real cookie, a real name, or a real
 trip. Each fixture is synthetic, built to the shape of the operator feed
 described in [docs/research.md](docs/research.md).
+
+A scenario test drives `archive.Run` with an injected clock, so no test
+reads the real time. `internal/ics` also carries a fuzz target for the
+reader-writer round trip and for the line-folding rule. A test with the
+`live` build tag reads `TRIPIT_FEED_URL` from the real environment and skips
+when it is empty; CI never sets that build tag.
 
 ## CI/CD
 
