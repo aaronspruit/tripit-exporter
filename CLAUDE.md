@@ -148,8 +148,8 @@ object and events, so a second run resumes where the first stopped. A
 download status other than `200` or `429` becomes a
 `*tripitweb.DownloadError`: the run writes a warning, keeps the `v2`
 object of that trip with no events, and continues. A trip UUID that
-`archive.ValidTripUUID` rejects gets a warning and no request. It prompts for the
-cookie on stdin and, when stdin is a terminal, turns off the echo with the
+`archive.ValidTripUUID` rejects gets a warning and no request. The backfill
+prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo with the
 Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists
 only in that prompt and in `Client.Cookie`; it never reaches a file, a log
 line, or an error message.
@@ -166,7 +166,7 @@ fake TripIt server; a test sets the response of a route with `SetFeed`,
 `SetTrips`, `SetTripDetail` or `SetDownload` before it makes a request that
 reads that route. The download route returns `403` when the request holds
 no `Referer` header, the way TripIt rejects a request with no browser
-header.
+header, and for a UUID that `BlockDownload` names.
 
 No test fixture holds a real feed URL, a real cookie, a real name, or a real
 trip. Each fixture is synthetic, built to the shape of the operator feed
