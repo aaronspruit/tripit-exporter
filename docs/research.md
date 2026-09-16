@@ -158,10 +158,13 @@ Answer these with the real account:
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
 2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
 
-The client sends a fixed set of browser headers to the download URL
-(`User-Agent`, `Accept`, `Accept-Language`, `Referer`,
-`Upgrade-Insecure-Requests` and the four `Sec-Fetch-*` headers), built from
-a typical Firefox request, and it sends `<trip uuid>.ics` as the file name.
+The client sends the headers of a Firefox 155 request on the TripIt website
+with every request: the website's own API call for a web API v2 route
+(`X-TRIPIT-APP-INFO`, `Sec-Fetch-Mode: cors`), and a browser navigation for
+the download URL (`Upgrade-Insecure-Requests` and the four `Sec-Fetch-*`
+headers). It sends `<trip uuid>.ics` as the file name. The website request
+also holds `X-CSRF-Token-WA` and two Dynatrace headers, `x-dtpc` and
+`x-dtreferer`; the client leaves them out, because a GET works without them.
 
 On 2026-09-16 the operator ran the backfill in Docker on the operator
 machine, which has the same public address as the browser. The download

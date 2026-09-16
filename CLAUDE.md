@@ -128,9 +128,11 @@ A crash before the rename leaves the old file whole.
 ## The backfill
 
 `internal/tripitweb.Client` sends the cookie as the `Cookie` header of every
-request. A web API v2 route also gets `Accept: application/json` and
-`X-Requested-With: XMLHttpRequest`; the download URL gets a fixed set of
-browser headers instead, because TripIt returns `403` to a request without
+request, with the `User-Agent` of `TRIPIT_USER_AGENT` or `DefaultUserAgent`
+and the headers of a Firefox request on the TripIt website. A web API v2
+route also gets the headers of the website's own API call
+(`apiHeaders`); the download URL gets the headers of a browser navigation
+(`downloadHeaders`), because TripIt returns `403` to a request without
 them. The header set and the `<uuid>.ics` file name work against the real
 account from the operator machine; `docs/research.md` open questions 1 and 2
 record what the real run did not test.

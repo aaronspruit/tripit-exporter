@@ -82,6 +82,10 @@ func (e *DownloadError) Error() string {
 type Client struct {
 	// BaseURL replaces DefaultBaseURL in a test.
 	BaseURL string
+	// UserAgent replaces DefaultUserAgent. It must be the User-Agent of the
+	// browser that the cookie comes from, because TripIt issues its Akamai
+	// cookie to that browser.
+	UserAgent string
 	// Cookie is the session cookie, as the Cookie header of a browser
 	// request. The client applies each Set-Cookie of a response to it, as a
 	// browser does, because TripIt updates its Akamai cookies on each
@@ -217,11 +221,48 @@ func (c *Client) GetTripDetail(ctx context.Context, uuid string) (json.RawMessag
 	return json.RawMessage(body), nil
 }
 
-// apiHeaders are the two headers that a web API v2 route needs beyond the
-// cookie. Without X-Requested-With, TripIt returns 401 for a valid session.
-var apiHeaders = map[string]string{
-	"Accept":           "application/json",
-	"X-Requested-With": "XMLHttpRequest",
+// DefaultUserAgent is the User-Agent of the Firefox request that
+// browserHeaders, apiHeaders and downloadHeaders copy.
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0"
+
+// browserHeaders are the headers that the browser sends with every request
+// to TripIt, beyond the cookie and the User-Agent. They come from a Firefox
+// request to /api/v2/list/trip on the TripIt website. The client leaves out
+// Accept-Encoding, because Go adds gzip and cannot read br or zstd, and
+// Connection, which HTTP/2 does not allow.
+var browserHeaders = map[string]string{
+	"Accept-Language": "en-US,en;q=0.9",
+	"DNT":             "1",
+	"Sec-GPC":         "1",
+}
+
+// apiHeaders are the headers that the TripIt website sends to a web API v2
+// route. Without X-Requested-With, TripIt returns 401 for a valid session.
+// The request also holds X-CSRF-Token-WA and two Dynatrace headers; a GET
+// works without them, and their values change for each session and page.
+var apiHeaders = withBrowserHeaders(map[string]string{
+	"Accept":            "application/json",
+	"Referer":           DefaultBaseURL + "/app/trips",
+	"X-Requested-With":  "XMLHttpRequest",
+	"X-TRIPIT-APP-INFO": "web/0.0.2",
+	"Sec-Fetch-Dest":    "empty",
+	"Sec-Fetch-Mode":    "cors",
+	"Sec-Fetch-Site":    "same-origin",
+	"Priority":          "u=0",
+})
+
+func withBrowserHeaders(headers map[string]string) map[string]string {
+	for k, v := range browserHeaders {
+		headers[k] = v
+	}
+	return headers
+}
+
+func (c *Client) userAgent() string {
+	if c.UserAgent != "" {
+		return c.UserAgent
+	}
+	return DefaultUserAgent
 }
 
 // apiGet sends one GET to a web API v2 route, and applies the retry rule: a
@@ -259,21 +300,20 @@ func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 	}
 }
 
-// downloadHeaders is the fixed set of browser headers that the "Export trip
-// to calendar" download URL needs beyond the cookie, built from a typical
-// Firefox request. docs/research.md open question 1 records what the real
+// downloadHeaders are the headers of a Firefox navigation to the "Export
+// trip to calendar" download URL. TripIt returns 403 to a request without
+// browser headers; docs/research.md open question 1 records what the real
 // account confirmed about this set.
-var downloadHeaders = map[string]string{
-	"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+var downloadHeaders = withBrowserHeaders(map[string]string{
 	"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-	"Accept-Language":           "en-US,en;q=0.5",
-	"Referer":                   DefaultBaseURL + "/",
+	"Referer":                   DefaultBaseURL + "/app/trips",
 	"Upgrade-Insecure-Requests": "1",
 	"Sec-Fetch-Dest":            "document",
 	"Sec-Fetch-Mode":            "navigate",
 	"Sec-Fetch-Site":            "same-origin",
 	"Sec-Fetch-User":            "?1",
-}
+	"Priority":                  "u=0, i",
+})
 
 // DownloadICS downloads the events of one trip from "Export trip to
 // calendar". name is the file name at the end of the URL; docs/research.md
@@ -336,6 +376,7 @@ func (c *Client) send(ctx context.Context, url string, headers map[string]string
 		return nil, 0, err
 	}
 	req.Header.Set("Cookie", c.cookieHeader())
+	req.Header.Set("User-Agent", c.userAgent())
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

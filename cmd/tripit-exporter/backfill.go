@@ -39,7 +39,8 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		Logf: func(format string, args ...any) {
 			_, _ = fmt.Fprintf(stdout, "tripit-exporter: "+format+"\n", args...)
 		},
-		Verbose: verbose(env["TRIPIT_VERBOSE"]),
+		Verbose:   verbose(env["TRIPIT_VERBOSE"]),
+		UserAgent: env["TRIPIT_USER_AGENT"],
 	}
 	ctx := context.Background()
 

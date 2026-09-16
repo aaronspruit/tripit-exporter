@@ -353,6 +353,59 @@ func TestSetCookieUpdatesTheNextRequest(t *testing.T) {
 	}
 }
 
+func TestEveryRequestSendsTheBrowserHeaders(t *testing.T) {
+	var got []http.Header
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Clone())
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Sleep: func(time.Duration) {}}
+	_ = client.Profile(context.Background())
+	_, _ = client.DownloadICS(context.Background(), "abc", "abc.ics")
+
+	api, download := got[0], got[1]
+	for name, want := range map[string]string{
+		"User-Agent":        DefaultUserAgent,
+		"Accept":            "application/json",
+		"Accept-Language":   "en-US,en;q=0.9",
+		"X-Requested-With":  "XMLHttpRequest",
+		"X-Tripit-App-Info": "web/0.0.2",
+		"Sec-Fetch-Mode":    "cors",
+	} {
+		if api.Get(name) != want {
+			t.Errorf("API request %s = %q, want %q", name, api.Get(name), want)
+		}
+	}
+	for name, want := range map[string]string{
+		"User-Agent":      DefaultUserAgent,
+		"Accept-Language": "en-US,en;q=0.9",
+		"Sec-Fetch-Mode":  "navigate",
+	} {
+		if download.Get(name) != want {
+			t.Errorf("download request %s = %q, want %q", name, download.Get(name), want)
+		}
+	}
+}
+
+func TestUserAgentReplacesTheDefault(t *testing.T) {
+	var got string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, UserAgent: "Mozilla/5.0 Test"}
+	if err := client.Profile(context.Background()); err != nil {
+		t.Fatalf("Profile: %v", err)
+	}
+	if got != "Mozilla/5.0 Test" {
+		t.Fatalf("User-Agent = %q, want the Client.UserAgent value", got)
+	}
+}
+
 func TestVerboseLogsRequestError(t *testing.T) {
 	var logged []string
 	client := &Client{

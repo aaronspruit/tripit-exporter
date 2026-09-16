@@ -97,7 +97,7 @@ func TestBackfillVerboseShowsRequestsWithoutTheCookie(t *testing.T) {
 	defer s.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": t.TempDir(), "TRIPIT_WEB_BASE_URL": s.URL, "TRIPIT_VERBOSE": "true"},
+	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": t.TempDir(), "TRIPIT_WEB_BASE_URL": s.URL, "TRIPIT_VERBOSE": "true", "TRIPIT_USER_AGENT": "Mozilla/5.0 Operator"},
 		strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
 
 	if code != 0 {
@@ -105,6 +105,9 @@ func TestBackfillVerboseShowsRequestsWithoutTheCookie(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "-> GET "+s.URL+"/api/v2/get/profile") || !strings.Contains(stdout.String(), "<- HTTP/1.1 200") {
 		t.Fatalf("stdout lacks the verbose request and response lines:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "User-Agent: Mozilla/5.0 Operator") {
+		t.Fatalf("stdout lacks the TRIPIT_USER_AGENT value:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "super-secret") {
 		t.Fatal("verbose output holds the cookie")

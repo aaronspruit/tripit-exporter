@@ -57,6 +57,7 @@ Then add a line such as this to the crontab of the user who owns the output fold
 |---|---|---|---|---|---|
 | `TRIPIT_FEED_URL` | Feed run | Yes | none | `tripit_feed_url` | The private feed URL. Treat it as a credential |
 | `OUTPUT_DIR` | Feed run, backfill | No | `/data` | | The folder for the archive |
+| `TRIPIT_USER_AGENT` | Backfill | No | Firefox 155 on Windows | | The `User-Agent` of the browser you copy the cookie from. The backfill sends it with every request |
 | `TRIPIT_VERBOSE` | Backfill | No | `false` | | When `true`, the backfill shows each request and response, with a timestamp. The cookie values stay hidden |
 
 The backfill reads the session cookie from its prompt, and never from an environment variable.
@@ -88,7 +89,7 @@ Each run merges the feed into the archive by event `UID`, and it ignores a chang
 Run the backfill once, to add the trips outside the feed window, and the structured fields of every trip:
 
 1. In a browser, sign in to TripIt with your TripIt email and password, and select "Keep me signed in". The cookie then stays valid if you must run the backfill again later. The box has no effect when you sign in with Google or another outside account.
-2. Open the developer tools, and open the Network tab. Load a TripIt page, and select a request to `www.tripit.com`. Copy the full value of its `Cookie` request header. The backfill needs all the cookies in that header, and not the session cookie alone.
+2. Open the developer tools, and open the Network tab. Load a TripIt page, and select a request to `www.tripit.com`. Copy the full value of its `Cookie` request header. The backfill needs all the cookies in that header, and not the session cookie alone. If your browser is not Firefox 155 on Windows, also copy the `User-Agent` request header into `TRIPIT_USER_AGENT`.
 3. Run `docker compose run --rm -it tripit-exporter backfill`.
 4. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
 5. When the backfill shows `done`, sign out of TripIt in the browser. This ends the session that the copied cookie belongs to.
