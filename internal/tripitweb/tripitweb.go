@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,9 +38,11 @@ var throttleWaits = []time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.M
 const retryDelay = 5 * time.Second
 
 // requestTimeout is the time that one request waits for the full response.
+// A normal response takes a few seconds, and TripIt throttles by holding a
+// request with no response, so a short timeout wastes less time.
 // A stalled request counts as throttled, so it gets the retries of
 // throttleWaits. A test sets a shorter value.
-var requestTimeout = 60 * time.Second
+var requestTimeout = 20 * time.Second
 
 // AuthError means the server rejected the session cookie twice: once, and
 // again after the one retry. A person must copy a new cookie.
@@ -79,7 +82,10 @@ func (e *DownloadError) Error() string {
 type Client struct {
 	// BaseURL replaces DefaultBaseURL in a test.
 	BaseURL string
-	// Cookie is the session cookie. The client sends it as the Cookie
+	// Cookie is the session cookie, as the Cookie header of a browser
+	// request. The client applies each Set-Cookie of a response to it, as a
+	// browser does, because TripIt updates its Akamai cookies on each
+	// response. The client sends it as the Cookie
 	// header of every request, and never writes it anywhere else.
 	Cookie string
 	// Sleep replaces time.Sleep in a test, so a test never waits for real.
@@ -92,7 +98,59 @@ type Client struct {
 	// header.
 	Verbose bool
 
-	sent bool
+	sent    bool
+	cookies []cookiePair
+	parsed  bool
+}
+
+// cookiePair is one name=value item of the Cookie header. An item with no
+// "=" has an empty name, and the client sends its value as it is.
+type cookiePair struct{ name, value string }
+
+// cookieHeader returns the Cookie header for the next request: the pasted
+// cookie, with each update of a Set-Cookie header applied.
+func (c *Client) cookieHeader() string {
+	if !c.parsed {
+		c.parsed = true
+		for _, item := range strings.Split(c.Cookie, ";") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			name, value, ok := strings.Cut(item, "=")
+			if !ok {
+				name, value = "", item
+			}
+			c.cookies = append(c.cookies, cookiePair{name: name, value: value})
+		}
+	}
+	items := make([]string, len(c.cookies))
+	for i, p := range c.cookies {
+		if p.name == "" {
+			items[i] = p.value
+			continue
+		}
+		items[i] = p.name + "=" + p.value
+	}
+	return strings.Join(items, "; ")
+}
+
+// applySetCookies updates the cookie with each Set-Cookie header of resp.
+// A cookie that the server expires is removed.
+func (c *Client) applySetCookies(resp *http.Response) {
+	for _, set := range resp.Cookies() {
+		expired := set.MaxAge < 0 || (!set.Expires.IsZero() && set.Expires.Before(time.Now()))
+		i := slices.IndexFunc(c.cookies, func(p cookiePair) bool { return p.name == set.Name })
+		switch {
+		case expired && i >= 0:
+			c.cookies = slices.Delete(c.cookies, i, i+1)
+		case expired:
+		case i >= 0:
+			c.cookies[i].value = set.Value
+		default:
+			c.cookies = append(c.cookies, cookiePair{name: set.Name, value: set.Value})
+		}
+	}
 }
 
 func (c *Client) baseURL() string {
@@ -277,7 +335,7 @@ func (c *Client) send(ctx context.Context, url string, headers map[string]string
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Header.Set("Cookie", c.Cookie)
+	req.Header.Set("Cookie", c.cookieHeader())
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -291,6 +349,7 @@ func (c *Client) send(ctx context.Context, url string, headers map[string]string
 		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.applySetCookies(resp)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

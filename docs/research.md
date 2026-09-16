@@ -176,6 +176,8 @@ for page 4 got no response for 60 seconds, after only 4 requests. TripIt
 therefore throttles by the requests of the last few minutes, and a stalled
 request is a second form of the same throttle. The client waits 5 seconds
 before each request, and it waits out a throttled request inside the run.
+The client applies the Akamai `Set-Cookie` headers to its next request, as a
+browser does. A third run has not yet shown whether that reduces the throttle.
 
 ## Sources
 

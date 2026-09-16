@@ -140,7 +140,7 @@ The v2 trip object holds no numeric trip ID, so the backfill reads
 
 The client waits 5 seconds before each request after the first (`pace`).
 TripIt throttles in four forms: a `429`, a TCP reset, an HTTP/2 protocol
-error, or a request that passes the 60-second `requestTimeout`. On each of
+error, or a request that passes the 20-second `requestTimeout`. On each of
 them the client waits 1, 2, 4, then 8 minutes (`throttleWaits`), writes a
 line through `Client.Logf` before each wait, and sends the same request
 again. The client retries a `401` once after 5 seconds; a second `401`
@@ -163,7 +163,8 @@ a failure, so a trip file with no key gets the download. `backfillSleep` replace
 `archive.ValidTripUUID` rejects gets a warning and no request. The backfill
 prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo with the
 Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists
-only in that prompt and in `Client.Cookie`; it never reaches a file, a log
+only in that prompt, in `Client.Cookie`, and in the cookie list that the
+client updates from each `Set-Cookie` header, as a browser does; it never reaches a file, a log
 line, or an error message.
 
 `TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`

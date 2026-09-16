@@ -298,9 +298,9 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 2. The client sends the full browser header set to the download URL. The set is a fixed list in the code.
 3. A helper turns a JSON value that is an object into an array of one. Each plan list goes through it.
 4. The client removes a duplicate object by its `uuid`.
-5. The client waits 5 seconds before each request after the first. Each request stops after 60 seconds.
+5. The client waits 5 seconds before each request after the first. Each request stops after 20 seconds. The client applies each `Set-Cookie` header to the cookie of its next request.
 6. A `401` gets one retry after 5 seconds. A second `401` stops the run with exit code `1`.
-7. A `429`, an HTTP/2 protocol error, a TCP reset, or a request that stops after 60 seconds gets a retry after 1, 2, 4, then 8 minutes. If TripIt still throttles the request, the run stops with exit code `0`, and the next run continues.
+7. A `429`, an HTTP/2 protocol error, a TCP reset, or a request that stops after 20 seconds gets a retry after 1, 2, 4, then 8 minutes. If TripIt still throttles the request, the run stops with exit code `0`, and the next run continues.
 
 ### The command
 

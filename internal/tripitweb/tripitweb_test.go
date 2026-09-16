@@ -325,6 +325,34 @@ func TestVerboseLogsRequestAndResponseWithoutSecrets(t *testing.T) {
 	}
 }
 
+func TestSetCookieUpdatesTheNextRequest(t *testing.T) {
+	var got []string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Cookie"))
+		if len(got) == 1 {
+			http.SetCookie(w, &http.Cookie{Name: "_abck", Value: "new", Domain: ".tripit.com"})
+			http.SetCookie(w, &http.Cookie{Name: "ak_bmsc", Value: "added"})
+			http.SetCookie(w, &http.Cookie{Name: "old", Value: "", MaxAge: -1})
+		}
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Cookie: "JSESSIONID=s1; _abck=stale; old=x; bare", Sleep: func(time.Duration) {}}
+	for i := 0; i < 2; i++ {
+		if err := client.Profile(context.Background()); err != nil {
+			t.Fatalf("Profile: %v", err)
+		}
+	}
+
+	if got[0] != "JSESSIONID=s1; _abck=stale; old=x; bare" {
+		t.Fatalf("first Cookie = %q, want the pasted cookie", got[0])
+	}
+	if got[1] != "JSESSIONID=s1; _abck=new; bare; ak_bmsc=added" {
+		t.Fatalf("second Cookie = %q, want the Set-Cookie updates applied", got[1])
+	}
+}
+
 func TestVerboseLogsRequestError(t *testing.T) {
 	var logged []string
 	client := &Client{
