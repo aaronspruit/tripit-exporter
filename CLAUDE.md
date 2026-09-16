@@ -161,8 +161,9 @@ download again. A download that holds zero events sets `empty_download:
 true`, so the next run skips that trip. The flag records a success and not
 a failure, so a trip file with no key gets the download. `backfillSleep` replaces the real wait in a `cmd` test. A trip UUID that
 `archive.ValidTripUUID` rejects gets a warning and no request. The backfill
-prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo with the
-Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`. The cookie exists
+prompts for the cookie on stdin and, when stdin is a terminal, turns off the echo and canonical mode with the
+Linux ioctl in `cmd/tripit-exporter/terminal_linux.go`; canonical mode cuts
+a line at 4095 bytes, and a full `Cookie` header can be longer. The cookie exists
 only in that prompt, in `Client.Cookie`, and in the cookie list that the
 client updates from each `Set-Cookie` header, as a browser does; it never reaches a file, a log
 line, or an error message.

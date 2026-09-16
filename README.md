@@ -87,11 +87,13 @@ Each run merges the feed into the archive by event `UID`, and it ignores a chang
 
 Run the backfill once, to add the trips outside the feed window, and the structured fields of every trip:
 
-1. In a browser, sign in to TripIt. Open the developer tools, and copy the value of the session cookie.
-2. Run `docker compose run --rm -it tripit-exporter backfill`.
-3. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
+1. In a browser, sign in to TripIt with your TripIt email and password, and select "Keep me signed in". The cookie then stays valid if you must run the backfill again later. The box has no effect when you sign in with Google or another outside account.
+2. Open the developer tools, and open the Network tab. Load a TripIt page, and select a request to `www.tripit.com`. Copy the full value of its `Cookie` request header. The backfill needs all the cookies in that header, and not the session cookie alone.
+3. Run `docker compose run --rm -it tripit-exporter backfill`.
+4. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
+5. When the backfill shows `done`, sign out of TripIt in the browser. This ends the session that the copied cookie belongs to.
 
-The backfill sends one request each 5 seconds, two for each trip, so 200 trips take about 35 minutes. When TripIt slows it down, it shows a line and waits up to 8 minutes before it tries again. The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
+TripIt accepts about 50 requests in 10 minutes, and the backfill sends two for each trip, so 200 trips take about 80 minutes. When TripIt holds a request with no response, the backfill shows a line and waits up to 8 minutes before it tries again. The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
 
 ## Limits
 

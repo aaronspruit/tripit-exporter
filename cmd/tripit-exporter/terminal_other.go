@@ -9,6 +9,6 @@ import "os"
 // test working on another OS during development.
 func isTerminal(f *os.File) bool { return false }
 
-func disableEcho(f *os.File) (restore func(), err error) {
+func cookieInputMode(f *os.File) (restore func(), err error) {
 	return func() {}, nil
 }

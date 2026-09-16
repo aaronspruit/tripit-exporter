@@ -306,7 +306,7 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 
 `tripit-exporter backfill`:
 
-1. Prompts for the cookie. If the input is a terminal, the prompt turns off the echo with the Linux `ioctl` from the `syscall` package. The cookie never goes to a file or to a log.
+1. Prompts for the cookie. If the input is a terminal, the prompt turns off the echo and canonical mode with the Linux `ioctl` from the `syscall` package. Canonical mode cuts a line at 4095 bytes, and a full `Cookie` header can be longer. The cookie never goes to a file or to a log.
 2. Calls `/api/v2/get/profile`. A `401` stops the run with exit code `1` before any trip request.
 3. Lists all trips, with `past=true&traveler=all` and `past=false&traveler=true`.
 4. Skips each trip whose file already holds `v2` and either events or `empty_download: true`. A second run therefore continues where the first run stopped, and tries a failed download again.

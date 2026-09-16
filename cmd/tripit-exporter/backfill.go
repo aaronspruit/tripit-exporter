@@ -207,26 +207,35 @@ func tripDates(detail json.RawMessage) (start, end string) {
 	return v.Trip.StartDate, v.Trip.EndDate
 }
 
-// readCookie prompts for the session cookie and reads one line. When stdin
-// is a terminal, it turns off the echo first, so the cookie never appears
-// on screen. It never writes the cookie anywhere but into the returned
-// string.
+// readCookie prompts for the session cookie and reads one line, of any
+// length. When stdin is a terminal, it sets cookieInputMode first, so the
+// cookie never appears on screen. The line ends at "\n" or "\r", because a
+// terminal with no line editing can send either one for Enter. It never
+// writes the cookie anywhere but into the returned string.
 func readCookie(stdin io.Reader, stdout io.Writer) (string, error) {
 	_, _ = fmt.Fprint(stdout, "TripIt session cookie: ")
 
 	if f, ok := stdin.(*os.File); ok && isTerminal(f) {
-		restore, err := disableEcho(f)
+		restore, err := cookieInputMode(f)
 		if err == nil {
 			defer restore()
 			defer func() { _, _ = fmt.Fprintln(stdout) }()
 		}
 	}
 
-	line, err := bufio.NewReader(stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", fmt.Errorf("read cookie: %w", err)
+	var line strings.Builder
+	r := bufio.NewReader(stdin)
+	for {
+		b, err := r.ReadByte()
+		if errors.Is(err, io.EOF) || b == '\n' || b == '\r' {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read cookie: %w", err)
+		}
+		line.WriteByte(b)
 	}
-	cookie := strings.TrimSpace(line)
+	cookie := strings.TrimSpace(line.String())
 	if cookie == "" {
 		return "", errors.New("the cookie must not be empty")
 	}
