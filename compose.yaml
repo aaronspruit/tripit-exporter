@@ -1,0 +1,11 @@
+services:
+  tripit-exporter:
+    build:
+      context: .
+    container_name: tripit-exporter
+    # The image is gcr.io/distroless/static:nonroot, which runs as UID 65532.
+    user: "65532:65532"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data

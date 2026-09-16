@@ -1,6 +1,7 @@
 .git
 .github
 .copilot-tracking
+k8s
 *_test.go
 testdata/
 data/

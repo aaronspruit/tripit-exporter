@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tripit-credentials
+type: Opaque
+stringData:
+  TRIPIT_FEED_URL: "https://www.tripit.com/feed/ical/private/your-key/tripit.ics"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tripit-feed-sync
+spec:
+  # TripIt refreshes the feed every 15 minutes, and a trip changes less often
+  # than that.
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          # The image is gcr.io/distroless/static:nonroot, which runs as UID
+          # 65532. fsGroup makes the kubelet chown the mounted volume to that
+          # group, which is what lets the non-root process write to it.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+          volumes:
+            # Configure your data volume here:
+            # Option A: hostPath (single-node clusters)
+            #
+            # NOTE: fsGroup does NOT apply to hostPath volumes. DirectoryOrCreate
+            # creates this path as root:root 0755, which the non-root container
+            # cannot write to. Create it on the node with the right owner before
+            # the first run:
+            #     sudo mkdir -p /data/tripit-exporter && sudo chown 65532:65532 /data/tripit-exporter
+            - name: data-storage
+              hostPath:
+                path: /data/tripit-exporter
+                type: DirectoryOrCreate
+            # Option B: PVC (multi-node clusters)
+            # - name: data-storage
+            #   persistentVolumeClaim:
+            #     claimName: tripit-data-pvc
+          containers:
+            - name: tripit-exporter
+              image: ghcr.io/OWNER/tripit-exporter:latest
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              env:
+                - name: OUTPUT_DIR
+                  value: /data
+                - name: TRIPIT_FEED_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: tripit-credentials
+                      key: TRIPIT_FEED_URL
+              volumeMounts:
+                - name: data-storage
+                  mountPath: /data
+              resources:
+                requests:
+                  memory: "32Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "64Mi"
+                  cpu: "200m"
