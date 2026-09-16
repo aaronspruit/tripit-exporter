@@ -59,7 +59,9 @@ The facts below come from the operator feed on 2026-09-14. It held one trip with
 | Flight | `item-<uuid>@tripit.com` | `AS123 SEA to LAX` | `[Flight]`, the local departure and arrival times with the zone name, the airline name, the flight number, the terminals and the gates |
 | Hotel | `item-<uuid>@tripit.com` | `Check-in: <hotel>` or `Check-out: <hotel>` | `[Lodging]`, the local time, the check-in or check-out time, the address and the phone number |
 
-A hotel stay is two events of one hour, one at check-in and one at check-out. No event covers the nights. Each plan `DESCRIPTION` starts with a link to `https://www.tripit.com/trip/show/id/<trip id>`, so the archive can group the plans by trip. The sample holds no confirmation number, seat, rate, booking site or traveler list.
+A hotel stay is two events of one hour, one at check-in and one at check-out. No event covers the nights. Each plan `DESCRIPTION` starts with a link to `https://www.tripit.com/trip/show/id/<trip id>`, so the archive can group the plans by trip. The feed holds no confirmation number, seat, cost, booking site or traveler list, not even as text in `DESCRIPTION`. The operator tested this on 2026-09-16 with a flight that holds an itinerary number, a cost and a seat in TripIt.
+
+The `UID` of an event stays the same when a person edits it in TripIt. On 2026-09-16 the operator changed a trip name, and the flight number and departure time of a plan. Each event kept its `UID`, and only `SUMMARY`, `DTSTART` and `DTSTAMP` changed.
 
 The archive keeps each `UID` with its latest `VEVENT`. A successful fetch replaces each event that it holds. The archive groups the events by the trip `uuid`, which is also the key of the v2 API. The trip event gives the `uuid` in its `UID` and the numeric trip ID in its link. A plan event links the numeric trip ID only, so the run finds the `uuid` through the trip event of the same fetch. If a trip is in a successful fetch and one of its archived events is absent, TripIt deleted that plan, so the archive deletes the event too. If a whole trip is absent and it ended more than 90 days before the fetch, the trip left the window, and the archive keeps it. If a whole trip is absent and it ended inside the window, TripIt deleted the trip, and the archive deletes its events. Keep a margin of some days at the edge of the window, because one sample does not give the exact boundary day. A failed fetch changes nothing.
 
@@ -154,9 +156,7 @@ The phases:
 Answer these with the real account:
 
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
-2. Does the `UID` of a feed event stay the same when you edit the plan? The archive merge needs a stable `UID`.
-3. If a plan holds a confirmation number in TripIt, does the feed `DESCRIPTION` show it?
-4. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
+2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
 
 ## Sources
 
