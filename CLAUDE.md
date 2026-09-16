@@ -131,18 +131,19 @@ A crash before the rename leaves the old file whole.
 request. A web API v2 route also gets `Accept: application/json` and
 `X-Requested-With: XMLHttpRequest`; the download URL gets a fixed set of
 browser headers instead, because TripIt returns `403` to a request without
-them. `docs/research.md` open questions 1 and 2 have not run against the
-real account yet, so the exact header set and the download file name are
-best-effort, not confirmed; an operator must run the backfill against the
-real account and update `docs/research.md` and the phase 3 issue with what
-it finds.
+them. The header set and the `<uuid>.ics` file name work against the real
+account from the operator machine; `docs/research.md` open questions 1 and 2
+record what the real run did not test.
+
+The v2 trip object holds no numeric trip ID, so the backfill reads
+`trip_id` from the TripIt link in the downloaded trip event.
 
 The client waits 1 second between two requests that follow each other
 (`Client.Pace`): before each trip, between the two trip lists, and between
 two list pages. Each request stops after 60 seconds (`requestTimeout`), and
 the timeout exits with code `2`. The client retries a
 `401` once after 5 seconds; a second `401` becomes an `*AuthError`, and a
-`429` or an HTTP/2 protocol error becomes a `*RateLimitedError`. `cmd`
+`429`, an HTTP/2 protocol error or a TCP reset becomes a `*RateLimitedError`. `cmd`
 turns the first into exit code `1` and the second into exit code `0`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes

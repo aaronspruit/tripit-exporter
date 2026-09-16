@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -222,6 +223,30 @@ func TestIsProtocolError(t *testing.T) {
 	}
 	if isProtocolError(errors.New("connection refused")) {
 		t.Fatal("isProtocolError() = true for an unrelated network error")
+	}
+}
+
+func TestConnectionResetExitsZero(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("Hijack: %v", err)
+			return
+		}
+		// A zero linger time makes Close send a TCP reset.
+		_ = conn.(*net.TCPConn).SetLinger(0)
+		_ = conn.Close()
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL}
+	err := client.Profile(context.Background())
+	var rateLimitErr *RateLimitedError
+	if !errors.As(err, &rateLimitErr) {
+		t.Fatalf("Profile() error = %v, want a *RateLimitedError", err)
+	}
+	if ExitCode(err) != 0 {
+		t.Fatalf("ExitCode(%v) = %d, want 0", err, ExitCode(err))
 	}
 }
 

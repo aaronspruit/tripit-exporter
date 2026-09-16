@@ -137,14 +137,14 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 				continue
 			}
 			tripEvents[tripUUID] = e
-			if id := tripIDOf(e); id != "" {
+			if id := TripIDOf(e); id != "" {
 				tripIDToUUID[id] = tripUUID
 			}
 		}
 	}
 
 	for _, e := range plans {
-		id := tripIDOf(e)
+		id := TripIDOf(e)
 		if id == "" {
 			continue
 		}
@@ -165,7 +165,7 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 			trips[tripUUID] = trip
 		}
 
-		trip.TripID = tripIDOf(tripEvent)
+		trip.TripID = TripIDOf(tripEvent)
 		trip.Start = dateValue(tripEvent.DTStart())
 		trip.End = dateValue(dtEnd(tripEvent))
 		trip.InFeed = true
@@ -255,7 +255,9 @@ func descriptionOf(e ics.Event) string {
 	return p.Raw
 }
 
-func tripIDOf(e ics.Event) string {
+// TripIDOf returns the numeric trip ID in the TripIt link of the DESCRIPTION
+// of e, or "" when e holds no link.
+func TripIDOf(e ics.Event) string {
 	m := tripIDPattern.FindStringSubmatch(descriptionOf(e))
 	if m == nil {
 		return ""

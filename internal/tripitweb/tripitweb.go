@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -41,8 +42,8 @@ func (e *AuthError) Error() string {
 	return "tripitweb: the session cookie was rejected twice, copy a new one"
 }
 
-// RateLimitedError means the server sent 429, or the connection failed with
-// an HTTP/2 protocol error. The run stops here; the next run continues from
+// RateLimitedError means the server sent 429, or it ended the connection
+// with an HTTP/2 protocol error or a TCP reset. The run stops here; the next run continues from
 // the trips it already wrote.
 type RateLimitedError struct{ cause error }
 
@@ -230,9 +231,8 @@ func (c *Client) DownloadICS(ctx context.Context, uuid, name string) ([]byte, er
 }
 
 // get sends one GET with the cookie and headers, and returns the body and
-// the status code. A network error that looks like an HTTP/2 protocol error
-// becomes a *RateLimitedError, because TripIt has been seen to end a long
-// backfill run that way.
+// the status code. A connection that the server ends becomes a
+// *RateLimitedError, because TripIt ends a backfill run that way.
 func (c *Client) get(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -248,22 +248,28 @@ func (c *Client) get(ctx context.Context, url string, headers map[string]string)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		if isProtocolError(err) {
-			return nil, 0, &RateLimitedError{cause: err}
-		}
-		return nil, 0, err
+		return nil, 0, connectionError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, connectionError(err)
 	}
 	return body, resp.StatusCode, nil
 }
 
-// isProtocolError reports whether err looks like the ERR_HTTP2_PROTOCOL_ERROR
-// that docs/research.md records after a long run of requests.
+// connectionError turns err into a *RateLimitedError when the server ended
+// the connection: with the ERR_HTTP2_PROTOCOL_ERROR that docs/research.md
+// records, or with a TCP reset, which TripIt sent to a real backfill run
+// after a few trips.
+func connectionError(err error) error {
+	if isProtocolError(err) || errors.Is(err, syscall.ECONNRESET) {
+		return &RateLimitedError{cause: err}
+	}
+	return err
+}
+
 func isProtocolError(err error) bool {
 	return strings.Contains(strings.ToUpper(err.Error()), "PROTOCOL_ERROR")
 }

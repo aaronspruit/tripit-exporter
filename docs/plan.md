@@ -300,7 +300,7 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 4. The client removes a duplicate object by its `uuid`.
 5. The client waits 1 second between two trips, between the two trip lists, and between two list pages. Each request stops after 60 seconds.
 6. A `401` gets one retry after 5 seconds. A second `401` stops the run with exit code `1`.
-7. A `429`, or an HTTP/2 protocol error, stops the run with exit code `0`. The next run continues.
+7. A `429`, an HTTP/2 protocol error, or a TCP reset stops the run with exit code `0`. The next run continues.
 
 ### The command
 

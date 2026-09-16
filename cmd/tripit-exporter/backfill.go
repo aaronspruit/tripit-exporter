@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -120,9 +119,6 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 	if start, end := tripDates(detail); start != "" {
 		trip.Start, trip.End = start, end
 	}
-	if id := relativeURLTripID(detail); id != "" {
-		trip.TripID = id
-	}
 
 	if len(trip.Events) > 0 {
 		return nil, nil
@@ -147,6 +143,11 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 			return fmt.Errorf("encode downloaded event for trip %s: %w", uuid, err), nil
 		}
 		parsed = append(parsed, archive.Event{UID: e.UID(), ICS: string(raw)})
+		// The v2 object holds no numeric trip ID, so it comes from the link
+		// in the trip event.
+		if e.UID() == uuid+"@tripit.com" {
+			trip.TripID = archive.TripIDOf(e)
+		}
 	}
 	trip.Events = parsed
 	trip.EmptyDownload = len(parsed) == 0
@@ -194,26 +195,6 @@ func tripDates(detail json.RawMessage) (start, end string) {
 		return "", ""
 	}
 	return v.Trip.StartDate, v.Trip.EndDate
-}
-
-// relativeURLTripIDPattern matches the numeric trip ID inside a trip's
-// relative_url field, for example "/trip/show/id/123456789".
-var relativeURLTripIDPattern = regexp.MustCompile(`/trip/show/id/(\d+)`)
-
-func relativeURLTripID(detail json.RawMessage) string {
-	var v struct {
-		Trip struct {
-			RelativeURL string `json:"relative_url"`
-		} `json:"Trip"`
-	}
-	if err := json.Unmarshal(detail, &v); err != nil {
-		return ""
-	}
-	m := relativeURLTripIDPattern.FindStringSubmatch(v.Trip.RelativeURL)
-	if m == nil {
-		return ""
-	}
-	return m[1]
 }
 
 // readCookie prompts for the session cookie and reads one line. When stdin

@@ -17,11 +17,11 @@ import (
 const testCookie = "JSESSIONID=super-secret-session-value"
 
 func tripJSON(uuid string) string {
-	return `{"uuid":"` + uuid + `","relative_url":"/trip/show/id/1001"}`
+	return `{"uuid":"` + uuid + `","relative_url":"/trip/show/uuid/` + uuid + `"}`
 }
 
 func tripDetailJSON(uuid string) string {
-	return `{"Trip":{"uuid":"` + uuid + `","relative_url":"/trip/show/id/1001","start_date":"2026-01-10","end_date":"2026-01-15"}}`
+	return `{"Trip":{"uuid":"` + uuid + `","relative_url":"/trip/show/uuid/` + uuid + `","start_date":"2026-01-10","end_date":"2026-01-15"}}`
 }
 
 const tripCalendar = "BEGIN:VCALENDAR\r\n" +
@@ -31,6 +31,7 @@ const tripCalendar = "BEGIN:VCALENDAR\r\n" +
 	"DTSTART;VALUE=DATE:20260110\r\n" +
 	"DTEND;VALUE=DATE:20260116\r\n" +
 	"SUMMARY:Denver, CO\r\n" +
+	"DESCRIPTION:View and/or edit details in TripIt : https://www.tripit.com/trip/show?id=1001\r\n" +
 	"END:VEVENT\r\n" +
 	"END:VCALENDAR\r\n"
 
@@ -79,6 +80,9 @@ func TestBackfillWritesTripFile(t *testing.T) {
 	}
 	if len(trip.Events) != 1 {
 		t.Fatalf("trip has %d events, want 1 from the downloaded calendar", len(trip.Events))
+	}
+	if trip.TripID != "1001" {
+		t.Fatalf("trip_id = %q, want 1001 from the link in the downloaded trip event", trip.TripID)
 	}
 
 	for _, line := range []string{"checking the cookie", "listing the trips", "1 trips, 1 to backfill", "trip 1 of 1: trip-a", "done"} {
