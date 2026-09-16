@@ -1,5 +1,6 @@
-# The archive and the secrets of a local run
+# The archive, its test copies, and the secrets of a local run
 /data/
+/data-*/
 .env
 .env.*
 !.env.example
@@ -7,6 +8,7 @@
 # Build and test output
 /tripit-exporter
 coverage.out
+*.log
 
 # Local agent and editor files
 .claude/
