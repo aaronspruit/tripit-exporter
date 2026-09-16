@@ -346,6 +346,25 @@ The fake server gains the v2 routes and the download route. It returns `403` fro
 
 Do this phase only if phase 3 finds that TripIt blocks the download. The backfill then makes each event of a trip from its v2 objects, with the `SUMMARY` and `DESCRIPTION` format of the feed. A flight event gets the `UID` from the `AirObject`. The v2 data has no `UID` for a check-in or a check-out event, so the backfill makes one from the lodging `uuid`. A later feed run then holds two events for the same stay inside the window. A merge rule for this case is a decision for this phase, and golden tests compare each made event with the export of the same trip.
 
+### Findings from the phase 3 backfill
+
+Do not start this phase while the download works. The phase 3 backfill of 2026-09-16 got the download for each trip, and a made event cannot keep the `UID` of the feed for half of the plan events. The one fact against this decision: a backfill with no download sends one request for each trip instead of two, so it takes half the time under the limit of about 50 requests in 10 minutes that [the research](research.md#open-questions) records.
+
+The comparison used 70 trips, with 70 trip events and 421 plan events, and compared each downloaded event with the v2 objects of its trip.
+
+| Event data | In the v2 objects |
+|---|---|
+| Trip event `UID` | Yes: the trip `uuid` |
+| Flight event `UID` | Yes: `item-<Segment uuid>`, 215 of the 421 plan events |
+| `UID` of a lodging, car or parking event | No. 206 of the 421 plan events: 75 check-in, 75 check-out, 27 car pick-up, 27 car drop-off, 1 parking arrival, 1 parking departure |
+| Numeric trip ID in each `DESCRIPTION` link | No. A made link must use `/trip/show/uuid/<uuid>` |
+| `GEO` | Not exactly. A flight event carries the coordinates of a city, and v2 holds only the airport coordinates. A lodging `GEO` has 7 decimal places, and the v2 `Address` has 6 |
+| `SUMMARY`, `LOCATION` | Yes: the trip `display_name` and `primary_location`, the flight `<airline code><number> <from> to <to>`, and `Check-in: <lodging display_name>` |
+| `DTSTART`, `DTEND` | Yes: `date`, `time` and `utc_offset`. A check-in or check-out event lasts one hour. The trip `DTEND` is the day after `end_date` |
+| Gate, terminal, phone and traveler name in `DESCRIPTION` | Yes |
+
+The v2 objects also hold data that no event holds: confirmation numbers, seats, cost, and the booking site.
+
 ## Out of scope
 
 1. A scheduled run of web API v2. The session lifetime is not known.
