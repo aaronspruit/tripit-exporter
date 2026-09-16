@@ -146,7 +146,9 @@ line through `Client.Logf` before each wait, and sends the same request
 again. The client retries a `401` once after 5 seconds; a second `401`
 becomes an `*AuthError`, and a request that TripIt still throttles after
 the last wait becomes a `*RateLimitedError`. `cmd` turns the first into
-exit code `1` and the second into exit code `0`.
+exit code `1` and the second into exit code `0`. `TRIPIT_VERBOSE=true` sets
+`Client.Verbose`, which writes each request and response through `Logf`
+and hides the value of `Cookie` and of each `Set-Cookie`.
 
 `cmd/tripit-exporter backfill` writes each trip file as soon as it finishes
 that trip, and skips a trip whose archived file already holds a `v2`

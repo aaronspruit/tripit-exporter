@@ -92,6 +92,25 @@ func TestBackfillWritesTripFile(t *testing.T) {
 	}
 }
 
+func TestBackfillVerboseShowsRequestsWithoutTheCookie(t *testing.T) {
+	s := newBackfillServer(t, "trip-a")
+	defer s.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"backfill"}, map[string]string{"OUTPUT_DIR": t.TempDir(), "TRIPIT_WEB_BASE_URL": s.URL, "TRIPIT_VERBOSE": "true"},
+		strings.NewReader(testCookie+"\n"), &stdout, &stderr, testNow)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "-> GET "+s.URL+"/api/v2/get/profile") || !strings.Contains(stdout.String(), "<- HTTP/1.1 200") {
+		t.Fatalf("stdout lacks the verbose request and response lines:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "super-secret") {
+		t.Fatal("verbose output holds the cookie")
+	}
+}
+
 func TestBackfillNoOutputHoldsTheCookie(t *testing.T) {
 	s := newBackfillServer(t, "trip-a")
 	defer s.Close()

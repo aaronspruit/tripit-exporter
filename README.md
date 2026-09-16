@@ -57,6 +57,7 @@ Then add a line such as this to the crontab of the user who owns the output fold
 |---|---|---|---|
 | `TRIPIT_FEED_URL` | none, required | `tripit_feed_url` | The private feed URL |
 | `OUTPUT_DIR` | none, required | | Folder for the archive |
+| `TRIPIT_VERBOSE` | `false` | | When `true`, the backfill shows each request and response, with the cookie values hidden |
 
 A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority over the matching environment variable.
 

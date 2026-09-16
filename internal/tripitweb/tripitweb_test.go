@@ -295,6 +295,49 @@ func TestConnectionResetEveryTimeExitsZero(t *testing.T) {
 	}
 }
 
+func TestVerboseLogsRequestAndResponseWithoutSecrets(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "bm_sz", Value: "set-cookie-secret"})
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("<html>Access Denied</html>"))
+	}))
+	defer s.Close()
+
+	var logged []string
+	client := &Client{
+		BaseURL: s.URL,
+		Cookie:  "JSESSIONID=cookie-secret",
+		Verbose: true,
+		Logf:    func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+	}
+	_, _ = client.DownloadICS(context.Background(), "abc", "abc.ics")
+
+	out := strings.Join(logged, "\n")
+	for _, want := range []string{"-> GET " + s.URL + "/trip/download/uuid/abc/abc.ics", "Cookie: <hidden, 24 bytes>", "Referer: ", "<- HTTP/1.1 403", "Set-Cookie: bm_sz=<hidden>", "Access Denied"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("verbose output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, secret := range []string{"cookie-secret", "set-cookie-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("verbose output holds %q:\n%s", secret, out)
+		}
+	}
+}
+
+func TestVerboseLogsRequestError(t *testing.T) {
+	var logged []string
+	client := &Client{
+		BaseURL: "http://127.0.0.1:1",
+		Verbose: true,
+		Logf:    func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+	}
+	_ = client.Profile(context.Background())
+	if !strings.Contains(strings.Join(logged, "\n"), "<- error after") {
+		t.Fatalf("verbose output lacks the request error: %q", logged)
+	}
+}
+
 func TestRateLimitedErrorMessage(t *testing.T) {
 	err := &RateLimitedError{cause: errors.New("boom")}
 	if !strings.Contains(err.Error(), "boom") {

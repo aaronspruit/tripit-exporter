@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -86,6 +87,10 @@ type Client struct {
 	// Logf, when it is not nil, gets one line before each wait for a
 	// throttled request, so an operator sees why the run is slow.
 	Logf func(format string, args ...any)
+	// Verbose makes the client write each request and each response through
+	// Logf. The lines hide the value of the cookie and of each Set-Cookie
+	// header.
+	Verbose bool
 
 	sent bool
 }
@@ -277,17 +282,88 @@ func (c *Client) send(ctx context.Context, url string, headers map[string]string
 		req.Header.Set(k, v)
 	}
 
+	c.logRequest(req)
+	start := time.Now()
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		c.verbosef("<- error after %s: %v", time.Since(start).Round(time.Millisecond), err)
 		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.verbosef("<- %s %d, body read error after %s: %v", resp.Proto, resp.StatusCode, time.Since(start).Round(time.Millisecond), err)
 		return nil, resp.StatusCode, err
 	}
+	c.logResponse(resp, body, time.Since(start))
 	return body, resp.StatusCode, nil
+}
+
+// verbosePreview is the number of body bytes that verbose mode shows for a
+// response other than 200.
+const verbosePreview = 300
+
+func (c *Client) verbosef(format string, args ...any) {
+	if c.Verbose && c.Logf != nil {
+		c.Logf("%s "+format, append([]any{time.Now().Format("15:04:05.000")}, args...)...)
+	}
+}
+
+func (c *Client) logRequest(req *http.Request) {
+	if !c.Verbose || c.Logf == nil {
+		return
+	}
+	c.verbosef("-> %s %s", req.Method, req.URL)
+	for _, name := range sortedKeys(req.Header) {
+		value := strings.Join(req.Header[name], ", ")
+		if name == "Cookie" {
+			value = fmt.Sprintf("<hidden, %d bytes>", len(value))
+		}
+		c.verbosef("   %s: %s", name, value)
+	}
+}
+
+func (c *Client) logResponse(resp *http.Response, body []byte, elapsed time.Duration) {
+	if !c.Verbose || c.Logf == nil {
+		return
+	}
+	c.verbosef("<- %s %d in %s, %d bytes", resp.Proto, resp.StatusCode, elapsed.Round(time.Millisecond), len(body))
+	for _, name := range sortedKeys(resp.Header) {
+		values := resp.Header[name]
+		if name == "Set-Cookie" {
+			values = cookieNames(values)
+		}
+		c.verbosef("   %s: %s", name, strings.Join(values, ", "))
+	}
+	if resp.StatusCode != http.StatusOK {
+		preview := body
+		if len(preview) > verbosePreview {
+			preview = preview[:verbosePreview]
+		}
+		c.verbosef("   body: %q", preview)
+	}
+}
+
+func sortedKeys(h http.Header) []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// cookieNames replaces the value of each Set-Cookie header with <hidden>,
+// and keeps the cookie name.
+func cookieNames(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		name, _, _ := strings.Cut(v, "=")
+		out[i] = name + "=<hidden>"
+	}
+	return out
 }
 
 // isThrottled reports whether TripIt throttled a request. docs/research.md

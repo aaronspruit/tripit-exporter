@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		Logf: func(format string, args ...any) {
 			_, _ = fmt.Fprintf(stdout, "tripit-exporter: "+format+"\n", args...)
 		},
+		Verbose: verbose(env["TRIPIT_VERBOSE"]),
 	}
 	ctx := context.Background()
 
@@ -98,6 +100,13 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 	}
 	_, _ = fmt.Fprintln(stdout, "tripit-exporter: done")
 	return 0
+}
+
+// verbose reports whether TRIPIT_VERBOSE turns on verbose mode. It accepts
+// the values of strconv.ParseBool, and an empty or other value is false.
+func verbose(value string) bool {
+	on, err := strconv.ParseBool(value)
+	return err == nil && on
 }
 
 // backfillSleep replaces time.Sleep in the backfill client. It is nil in
