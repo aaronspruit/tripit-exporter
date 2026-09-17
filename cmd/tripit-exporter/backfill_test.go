@@ -342,6 +342,9 @@ func TestBackfillRateLimitExitsZeroWithTripsBeforeItOnDisk(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "trips", "trip-b.json")); !os.IsNotExist(err) {
 		t.Fatalf("trip-b must not be on disk: err = %v", err)
 	}
+	if got := strings.Count(stdout.String(), "tripit-exporter: TripIt throttled a request"); got != 4 {
+		t.Fatalf("stdout has %d throttle lines, want 4:\n%s", got, stdout.String())
+	}
 }
 
 func TestBackfillUnauthorizedBeforeAnyTripRequestExitsOne(t *testing.T) {
@@ -397,5 +400,16 @@ func TestReadCookieEmptyIsError(t *testing.T) {
 
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
+	}
+}
+
+func TestReadCookieBackspaceErasesTheByteBeforeIt(t *testing.T) {
+	var stdout bytes.Buffer
+	got, err := readCookie(strings.NewReader("a=1x\x7f; b=2y\b\n"), &stdout)
+	if err != nil {
+		t.Fatalf("readCookie: %v", err)
+	}
+	if got != "a=1; b=2" {
+		t.Fatalf("readCookie() = %q, want %q", got, "a=1; b=2")
 	}
 }

@@ -234,6 +234,14 @@ func readCookie(stdin io.Reader, stdout io.Writer) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read cookie: %w", err)
 		}
+		// With canonical mode off, the terminal sends backspace as a byte.
+		// A cookie never holds that byte, so it erases the byte before it.
+		if b == 0x7f || b == '\b' {
+			s := line.String()
+			line.Reset()
+			line.WriteString(s[:max(len(s)-1, 0)])
+			continue
+		}
 		line.WriteByte(b)
 	}
 	cookie := strings.TrimSpace(line.String())

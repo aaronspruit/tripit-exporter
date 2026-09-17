@@ -34,9 +34,6 @@ const pace = 5 * time.Second
 // timed out. After the last retry, the request returns a *RateLimitedError.
 var throttleWaits = []time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute}
 
-// retryDelay is the wait before the one retry of a 401 response.
-const retryDelay = 5 * time.Second
-
 // requestTimeout is the time that one request waits for the full response.
 // A normal response takes a few seconds, and TripIt throttles by holding a
 // request with no response, so a short timeout wastes less time.
@@ -106,6 +103,11 @@ type Client struct {
 	cookies []cookiePair
 	parsed  bool
 }
+
+// The client keeps its own cookie list and not a net/http/cookiejar: the
+// pasted Cookie header holds no domain or path, so a jar cannot match a
+// Set-Cookie for .tripit.com to the pasted cookie that it replaces, and sends
+// both values.
 
 // cookiePair is one name=value item of the Cookie header. An item with no
 // "=" has an empty name, and the client sends its value as it is.
@@ -266,7 +268,7 @@ func (c *Client) userAgent() string {
 }
 
 // apiGet sends one GET to a web API v2 route, and applies the retry rule: a
-// 401 gets one retry after 5 seconds, and a second 401 becomes an
+// 401 gets one retry after the pace, and a second 401 becomes an
 // *AuthError. A 429, on either try, becomes a *RateLimitedError.
 func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 	body, status, err := c.get(ctx, c.baseURL()+path, apiHeaders)
@@ -283,7 +285,6 @@ func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 		return body, nil
 	}
 
-	c.sleep(retryDelay)
 	body, status, err = c.get(ctx, c.baseURL()+path, apiHeaders)
 	if err != nil {
 		return nil, err
@@ -456,12 +457,14 @@ func sortedKeys(h http.Header) []string {
 }
 
 // cookieNames replaces the value of each Set-Cookie header with <hidden>,
-// and keeps the cookie name.
+// and keeps the cookie name. A header with no "=" is hidden in full.
 func cookieNames(values []string) []string {
 	out := make([]string, len(values))
 	for i, v := range values {
-		name, _, _ := strings.Cut(v, "=")
-		out[i] = name + "=<hidden>"
+		out[i] = "<hidden>"
+		if name, _, found := strings.Cut(v, "="); found {
+			out[i] = name + "=<hidden>"
+		}
 	}
 	return out
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,8 +93,8 @@ func TestUnauthorizedRetrySucceeds(t *testing.T) {
 	if err := client.Profile(context.Background()); err != nil {
 		t.Fatalf("Profile: %v", err)
 	}
-	if len(slept) != 2 || slept[0] != retryDelay || slept[1] != pace {
-		t.Fatalf("slept %v, want the retry delay %v, then the pace %v", slept, retryDelay, pace)
+	if len(slept) != 1 || slept[0] != pace {
+		t.Fatalf("slept %v, want one pace %v before the retry", slept, pace)
 	}
 }
 
@@ -449,5 +450,13 @@ func TestExitCodeSuccess(t *testing.T) {
 func TestExitCodeOtherError(t *testing.T) {
 	if ExitCode(errors.New("boom")) != 2 {
 		t.Fatalf("ExitCode(boom) = %d, want 2", ExitCode(errors.New("boom")))
+	}
+}
+
+func TestCookieNamesHidesAHeaderWithNoEquals(t *testing.T) {
+	got := cookieNames([]string{"bm_sz=secret; Path=/", "secret-with-no-name"})
+	want := []string{"bm_sz=<hidden>", "<hidden>"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("cookieNames() = %q, want %q", got, want)
 	}
 }
