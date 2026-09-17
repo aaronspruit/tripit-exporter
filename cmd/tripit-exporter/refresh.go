@@ -21,15 +21,15 @@ import (
 // it_session_id value of the JSON refresh.
 const sessionFile = ".tripit-session"
 
-// defaultRefreshDays is the value of TRIPIT_JSON_REFRESH_DAYS when it is
-// empty.
-const defaultRefreshDays = 7
+// defaultLookbackDays is the value of TRIPIT_JSON_REFRESH_LOOKBACK_DAYS when
+// it is empty.
+const defaultLookbackDays = 7
 
 // refreshConfig is the JSON refresh setting of a scheduled run.
 type refreshConfig struct {
-	enabled  bool
-	days     int
-	sessions []sessionValue
+	enabled      bool
+	lookbackDays int
+	sessions     []sessionValue
 }
 
 // sessionValue is one it_session_id value, and the name of the place that
@@ -39,20 +39,20 @@ type sessionValue struct {
 	value  string
 }
 
-// readRefreshConfig reads TRIPIT_JSON_REFRESH, TRIPIT_JSON_REFRESH_DAYS and
-// the session values. When the refresh is off, it reads nothing else. An
+// readRefreshConfig reads TRIPIT_JSON_REFRESH,
+// TRIPIT_JSON_REFRESH_LOOKBACK_DAYS and the session values. When the refresh is off, it reads nothing else. An
 // error stops the run before any request.
 func readRefreshConfig(env map[string]string, outputDir string) (refreshConfig, error) {
-	cfg := refreshConfig{enabled: boolEnv(env["TRIPIT_JSON_REFRESH"]), days: defaultRefreshDays}
+	cfg := refreshConfig{enabled: boolEnv(env["TRIPIT_JSON_REFRESH"]), lookbackDays: defaultLookbackDays}
 	if !cfg.enabled {
 		return cfg, nil
 	}
-	if v := env["TRIPIT_JSON_REFRESH_DAYS"]; v != "" {
+	if v := env["TRIPIT_JSON_REFRESH_LOOKBACK_DAYS"]; v != "" {
 		days, err := strconv.Atoi(v)
 		if err != nil || days < 0 {
-			return cfg, fmt.Errorf("TRIPIT_JSON_REFRESH_DAYS must be a whole number of 0 or more, not %q", v)
+			return cfg, fmt.Errorf("TRIPIT_JSON_REFRESH_LOOKBACK_DAYS must be a whole number of 0 or more, not %q", v)
 		}
-		cfg.days = days
+		cfg.lookbackDays = days
 	}
 	cfg.sessions = sessionValues(env, outputDir)
 	if len(cfg.sessions) == 0 {
@@ -115,7 +115,7 @@ func runRefresh(env map[string]string, outputDir string, cfg refreshConfig, stdo
 
 	// The feed holds the events of each trip that ended in the last 83 days,
 	// so the refresh reads the JSON alone for a trip that holds events.
-	cutoff := now.AddDate(0, 0, -cfg.days).Format("2006-01-02")
+	cutoff := now.AddDate(0, 0, -cfg.lookbackDays).Format("2006-01-02")
 	code := syncTrips(ctx, client, outputDir, "refresh", func(trip *archive.Trip) bool {
 		return needsBackfill(trip) || trip.End == "" || trip.End >= cutoff
 	}, stdout, stderr)

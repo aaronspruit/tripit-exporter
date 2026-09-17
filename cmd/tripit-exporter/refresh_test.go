@@ -120,8 +120,8 @@ func TestRefreshSettingErrorsExitTwoBeforeAnyRequest(t *testing.T) {
 		want   string
 	}{
 		{"no session", func(env map[string]string) { delete(env, "TRIPIT_SESSION") }, "TRIPIT_SESSION"},
-		{"negative days", func(env map[string]string) { env["TRIPIT_JSON_REFRESH_DAYS"] = "-1" }, "TRIPIT_JSON_REFRESH_DAYS"},
-		{"days not a number", func(env map[string]string) { env["TRIPIT_JSON_REFRESH_DAYS"] = "seven" }, "TRIPIT_JSON_REFRESH_DAYS"},
+		{"negative days", func(env map[string]string) { env["TRIPIT_JSON_REFRESH_LOOKBACK_DAYS"] = "-1" }, "TRIPIT_JSON_REFRESH_LOOKBACK_DAYS"},
+		{"days not a number", func(env map[string]string) { env["TRIPIT_JSON_REFRESH_LOOKBACK_DAYS"] = "seven" }, "TRIPIT_JSON_REFRESH_LOOKBACK_DAYS"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -191,8 +191,8 @@ the next value, and exits with `1` when none remains.
 `docs/research.md` holds the tests behind each of these rules.
 
 The refresh reads each trip that `needsBackfill` selects, and each trip
-whose `end` is on or after the run date minus `TRIPIT_JSON_REFRESH_DAYS`
-days, or empty. The `last_modified` of a trip does not change when its
+whose `end` is on or after the run date minus
+`TRIPIT_JSON_REFRESH_LOOKBACK_DAYS` days, or empty. The `last_modified` of a trip does not change when its
 plans change, so the list cannot show a changed trip. A trip that holds
 events or `empty_download: true` gets no download, because the feed holds
 the events of each trip that ended in the last 83 days. `sameV2` ignores
