@@ -205,3 +205,50 @@ func TestServerDownloadRouteMissingTrip(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
 }
+
+func TestServerSessionRule(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.RejectSession("rejected")
+
+	get := func(cookie string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, s.URL+"/api/v2/get/profile", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Cookie", cookie)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp
+	}
+	setValue := func(resp *http.Response, name string) string {
+		for _, c := range resp.Cookies() {
+			if c.Name == name {
+				return c.Value
+			}
+		}
+		return ""
+	}
+
+	resp := get("it_session_id=kept")
+	if resp.StatusCode != http.StatusOK || setValue(resp, "it_session_id") != RenewedSession("kept") || setValue(resp, "session_id") == "" {
+		t.Fatalf("it_session_id alone: status %d, cookies %v, want 200 with a new session and a renewed value", resp.StatusCode, resp.Cookies())
+	}
+
+	resp = get("session_id=s; it_session_id=kept")
+	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 0 {
+		t.Fatalf("with session_id: status %d, cookies %v, want 200 and no cookie", resp.StatusCode, resp.Cookies())
+	}
+
+	if resp = get("it_session_id=rejected"); resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("rejected value: status %d, want 500", resp.StatusCode)
+	}
+
+	if got := len(s.Paths()); got != 3 {
+		t.Fatalf("Paths() has %d paths, want 3", got)
+	}
+}

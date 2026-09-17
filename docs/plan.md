@@ -411,14 +411,14 @@ The refresh lists all trips, as the backfill does. It reads the detail of a trip
 2. The trip holds `v2`, no events and no `empty_download: true`. The refresh tries the download again.
 3. The `end` of the trip is on or after the run date minus `TRIPIT_JSON_REFRESH_DAYS` days, or the trip has no `end`.
 
-The `last_modified` of a trip does not show a change to its plans, so the refresh reads the detail of each trip in the window. The refresh does not download the events of a trip that holds events, because the feed holds the events of each trip that ended in the last 83 days. A window of more than 83 days refreshes `v2` alone for the older trips.
+The `last_modified` of a trip does not show a change to its plans, so the refresh reads the detail of each trip in the window. The refresh does not download the events of a trip that holds events or `empty_download: true`, because the feed holds the events of each trip that ended in the last 83 days. A window of more than 83 days refreshes `v2` alone for the older trips.
 
 The refresh keeps the stored `v2` object when the new response differs from it only in the top-level `timestamp`. The archive therefore changes only when TripIt data changes. The refresh writes each trip file when it finishes that trip.
 
 ### The run
 
 1. When `TRIPIT_JSON_REFRESH` is `true` and no state file and no `TRIPIT_SESSION` exist, the run exits with `2` before any request. A value of `TRIPIT_JSON_REFRESH_DAYS` that is not a whole number of `0` or more also exits with `2`.
-2. A feed error exits with its code, and the refresh does not run.
+2. A feed error exits with its code, and the refresh does not run. A feed rate limit also ends the run before the refresh.
 3. After the feed merge, a refresh error sets the exit code: a rejected session gives `1`, a `*RateLimitedError` gives `0`, and each other error gives `2`.
 4. `k8s/cronjob.yaml` gets the optional `TRIPIT_SESSION` key in its Secret, `TRIPIT_JSON_REFRESH` in a comment, and an `activeDeadlineSeconds` of `1800`, because a throttled request can wait 15 minutes. `.env.example` gets the three variables in comments.
 

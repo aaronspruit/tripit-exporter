@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -30,18 +31,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		return 2
 	}
 
-	// TRIPIT_WEB_BASE_URL is empty in production, so the client calls the
-	// real TripIt host. A test sets it to a fake server's URL.
-	client := &tripitweb.Client{
-		Cookie:  cookie,
-		BaseURL: env["TRIPIT_WEB_BASE_URL"],
-		Sleep:   backfillSleep,
-		Logf: func(format string, args ...any) {
-			_, _ = fmt.Fprintf(stdout, "tripit-exporter: "+format+"\n", args...)
-		},
-		Verbose:   verbose(env["TRIPIT_VERBOSE"]),
-		UserAgent: env["TRIPIT_USER_AGENT"],
-	}
+	client := newWebClient(env, cookie, stdout)
 	ctx := context.Background()
 
 	// Each step writes a progress line to stdout before its first request,
@@ -51,6 +41,37 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		return backfillExitCode(err, stderr)
 	}
 
+	return syncTrips(ctx, client, outputDir, "backfill", needsBackfill, stdout, stderr)
+}
+
+// newWebClient returns a web API v2 client that sends cookie and writes its
+// lines to stdout. TRIPIT_WEB_BASE_URL is empty in production, so the client
+// calls the real TripIt host. A test sets it to a fake server's URL.
+func newWebClient(env map[string]string, cookie string, stdout io.Writer) *tripitweb.Client {
+	return &tripitweb.Client{
+		Cookie:  cookie,
+		BaseURL: env["TRIPIT_WEB_BASE_URL"],
+		Sleep:   backfillSleep,
+		Logf: func(format string, args ...any) {
+			_, _ = fmt.Fprintf(stdout, "tripit-exporter: "+format+"\n", args...)
+		},
+		Verbose:   boolEnv(env["TRIPIT_VERBOSE"]),
+		UserAgent: env["TRIPIT_USER_AGENT"],
+	}
+}
+
+// needsBackfill reports whether the backfill reads a trip: a trip with no
+// file, no v2 object, or no events and no empty download. A second backfill
+// run therefore skips each trip that the first run finished.
+func needsBackfill(trip *archive.Trip) bool {
+	return trip == nil || !hasV2(trip) || (len(trip.Events) == 0 && !trip.EmptyDownload)
+}
+
+// syncTrips lists every trip of the account, and reads each trip that want
+// selects. want gets nil for a trip that the archive does not hold. verb
+// names the work in the progress lines. It writes the archive after each
+// trip, and returns the exit code.
+func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb string, want func(*archive.Trip) bool, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintln(stdout, "tripit-exporter: listing the trips")
 	trips, err := listAllTrips(ctx, client)
 	if err != nil {
@@ -70,15 +91,15 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 			continue
 		}
 		if !archive.ValidTripUUID(uuid) {
-			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the backfill skips it\n", uuid)
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the %s skips it\n", uuid, verb)
 			continue
 		}
-		if trip, ok := archived[uuid]; ok && hasV2(trip) && (len(trip.Events) > 0 || trip.EmptyDownload) {
+		if !want(archived[uuid]) {
 			continue
 		}
 		todo = append(todo, uuid)
 	}
-	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to backfill\n", len(trips), len(todo))
+	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to %s\n", len(trips), len(todo), verb)
 
 	for i, uuid := range todo {
 		_, _ = fmt.Fprintf(stdout, "tripit-exporter: trip %d of %d: %s\n", i+1, len(todo), uuid)
@@ -99,9 +120,10 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 	return 0
 }
 
-// verbose reports whether TRIPIT_VERBOSE turns on verbose mode. It accepts
-// the values of strconv.ParseBool, and an empty or other value is false.
-func verbose(value string) bool {
+// boolEnv reports whether an environment variable such as TRIPIT_VERBOSE is
+// on. It accepts the values of strconv.ParseBool, and an empty or other
+// value is false.
+func boolEnv(value string) bool {
 	on, err := strconv.ParseBool(value)
 	return err == nil && on
 }
@@ -111,7 +133,7 @@ func verbose(value string) bool {
 var backfillSleep func(time.Duration)
 
 // backfillTrip reads the v2 detail of uuid, and downloads its events when
-// the archive holds none yet. It mutates archived in place. A download that
+// the archive holds none yet and no earlier download held zero events. It mutates archived in place. A download that
 // fails for this trip alone, with a *tripitweb.DownloadError or a calendar
 // that does not parse, returns a warning: the trip keeps its v2 object with
 // no events, so the next run tries the download again. An error stops the
@@ -127,12 +149,14 @@ func backfillTrip(ctx context.Context, client *tripitweb.Client, archived map[st
 		trip = &archive.Trip{Schema: 1, UUID: uuid}
 		archived[uuid] = trip
 	}
-	trip.V2 = detail
+	if !sameV2(trip.V2, detail) {
+		trip.V2 = detail
+	}
 	if start, end := tripDates(detail); start != "" {
 		trip.Start, trip.End = start, end
 	}
 
-	if len(trip.Events) > 0 {
+	if len(trip.Events) > 0 || trip.EmptyDownload {
 		return nil, nil
 	}
 
@@ -191,6 +215,19 @@ func backfillExitCode(err error, stderr io.Writer) int {
 // download.
 func hasV2(trip *archive.Trip) bool {
 	return len(trip.V2) > 0 && string(trip.V2) != "null"
+}
+
+// sameV2 reports whether two trip detail responses hold the same data. It
+// ignores the top-level timestamp, which changes with each request, and the
+// layout of the JSON, because the archive writes v2 indented.
+func sameV2(a, b json.RawMessage) bool {
+	var va, vb map[string]any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	delete(va, "timestamp")
+	delete(vb, "timestamp")
+	return reflect.DeepEqual(va, vb)
 }
 
 // tripDates reads start_date and end_date from a trip detail response, as

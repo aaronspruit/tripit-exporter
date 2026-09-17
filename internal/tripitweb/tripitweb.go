@@ -75,6 +75,17 @@ func (e *DownloadError) Error() string {
 	return fmt.Sprintf("tripitweb: download trip %s: unexpected status %d", e.UUID, e.Status)
 }
 
+// StatusError means a web API v2 route returned a status other than 200,
+// 401 or 429.
+type StatusError struct {
+	Path   string
+	Status int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("tripitweb: unexpected status %d for %s", e.Status, e.Path)
+}
+
 // Client calls the TripIt web API v2 and the download URL.
 type Client struct {
 	// BaseURL replaces DefaultBaseURL in a test.
@@ -139,6 +150,19 @@ func (c *Client) cookieHeader() string {
 		items[i] = p.name + "=" + p.value
 	}
 	return strings.Join(items, "; ")
+}
+
+// CookieValue returns the current value of the cookie name: the value in
+// Cookie, or the value of the last Set-Cookie header for that name. It
+// returns "" when the client holds no cookie of that name.
+func (c *Client) CookieValue(name string) string {
+	c.cookieHeader()
+	for _, p := range c.cookies {
+		if p.name == name {
+			return p.value
+		}
+	}
+	return ""
 }
 
 // applySetCookies updates the cookie with each Set-Cookie header of resp.
@@ -280,7 +304,7 @@ func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 	}
 	if status != http.StatusUnauthorized {
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("tripitweb: unexpected status %d for %s", status, path)
+			return nil, &StatusError{Path: path, Status: status}
 		}
 		return body, nil
 	}
@@ -297,7 +321,7 @@ func (c *Client) apiGet(ctx context.Context, path string) ([]byte, error) {
 	case http.StatusOK:
 		return body, nil
 	default:
-		return nil, fmt.Errorf("tripitweb: unexpected status %d for %s", status, path)
+		return nil, &StatusError{Path: path, Status: status}
 	}
 }
 

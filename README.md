@@ -1,6 +1,6 @@
 # tripit-exporter
 
-tripit-exporter keeps a local archive of your TripIt trips: one JSON file for each trip, one ICS file for each trip, and one ICS file for all trips. A scheduled run reads the TripIt private calendar feed, and a one-time backfill reads the TripIt web API to add the older trips.
+tripit-exporter keeps a local archive of your TripIt trips: one JSON file for each trip, one ICS file for each trip, and one ICS file for all trips. A scheduled run reads the TripIt private calendar feed, and a one-time backfill reads the TripIt web API to add the older trips. The scheduled run can also keep the JSON of recent and future trips current.
 
 ## Set up the calendar feed
 
@@ -57,8 +57,11 @@ Then add a line such as this to the crontab of the user who owns the output fold
 |---|---|---|---|---|---|
 | `TRIPIT_FEED_URL` | Feed run | Yes | none | `tripit_feed_url` | The private feed URL. Treat it as a credential |
 | `OUTPUT_DIR` | Feed run, backfill | No | `/data` | | The folder for the archive |
-| `TRIPIT_USER_AGENT` | Backfill | No | Firefox 155 on Windows | | The `User-Agent` of the browser you copy the cookie from. The backfill sends it with every request |
-| `TRIPIT_VERBOSE` | Backfill | No | `false` | | When `true`, the backfill shows each request and response, with a timestamp. The cookie values stay hidden |
+| `TRIPIT_JSON_REFRESH` | Feed run | No | `false` | | When `true`, each run also refreshes the JSON of the trips. See [Refresh the trip JSON](#refresh-the-trip-json) |
+| `TRIPIT_JSON_REFRESH_DAYS` | Feed run | No | `7` | | The refresh reads a trip again when the trip ends on or after this number of days before the run |
+| `TRIPIT_SESSION` | Feed run | When `TRIPIT_JSON_REFRESH` is `true` | none | `tripit_session` | The value of the TripIt cookie `it_session_id`. Treat it as a credential |
+| `TRIPIT_USER_AGENT` | Backfill, refresh | No | Firefox 155 on Windows | | The `User-Agent` of the browser you copy the cookie from. The backfill and the refresh send it with every request |
+| `TRIPIT_VERBOSE` | Backfill, refresh | No | `false` | | When `true`, the backfill and the refresh show each request and response, with a timestamp. The cookie values stay hidden |
 
 The backfill reads the session cookie from its prompt, and never from an environment variable.
 
@@ -68,6 +71,7 @@ A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority ov
 
 ```text
 data/
+├── .tripit-session         the newest TripIt session value, when the JSON refresh is on
 ├── tripit.ics              the events of every trip in the archive
 └── trips/
     ├── <trip uuid>.json    one trip: its events, and its v2 objects once the backfill has read it
@@ -81,7 +85,7 @@ Each run merges the feed into the archive by event `UID`, and it ignores a chang
 | Code | Reason |
 |---|---|
 | `0` | Success, or a `429` rate limit. The next run continues |
-| `1` | The feed URL is wrong or revoked, or the backfill cookie is invalid. Get a new one |
+| `1` | The feed URL is wrong or revoked, or TripIt rejected the backfill cookie or the refresh session. Get a new one |
 | `2` | Any other error |
 
 ## Backfill
@@ -92,13 +96,26 @@ Run the backfill once, to add the trips outside the feed window, and the structu
 2. Open the developer tools, and open the Network tab. Load a TripIt page, and select a request to `www.tripit.com`. Copy the full value of its `Cookie` request header. The backfill needs all the cookies in that header, and not the session cookie alone. If your browser is not Firefox 155 on Windows, also copy the `User-Agent` request header into `TRIPIT_USER_AGENT`.
 3. Run `docker compose run --rm -it tripit-exporter backfill`.
 4. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
-5. When the backfill shows `done`, sign out of TripIt in the browser. This ends the session that the copied cookie belongs to.
+5. When the backfill shows `done`, delete the copied cookie from the clipboard. A sign-out in the browser does not stop the `it_session_id` value in that cookie.
 
 TripIt accepts about 50 requests in 10 minutes, and the backfill sends two for each trip, so 200 trips take about 80 minutes. When TripIt holds a request with no response, the backfill shows a line and waits up to 8 minutes before it tries again. The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
 
+## Refresh the trip JSON
+
+The scheduled run can also read the JSON of the trips that can still change. The refresh is off by default. To turn it on:
+
+1. In a private browser window, sign in to TripIt with your TripIt email and password, and select "Keep me signed in".
+2. Open the developer tools. In Firefox, open Storage, then Cookies, then `https://www.tripit.com`. In Chrome, open Application, then Cookies. Copy the value of `it_session_id`.
+3. Set `TRIPIT_SESSION` to that value, and set `TRIPIT_JSON_REFRESH=true`. On Kubernetes, put `TRIPIT_SESSION` in the Secret.
+4. Close the private window.
+
+After the feed merge, the refresh lists the trips. It reads the JSON of each future trip, each trip that ended in the last `TRIPIT_JSON_REFRESH_DAYS` days, and each trip that the archive does not hold yet. TripIt shows a change to the plans of a trip only in the JSON of that trip, so the refresh reads each trip in that window. A trip file changes only when the TripIt data changes. The feed gives the events of these trips, so the refresh does not download their events again. A first refresh with no backfill reads every trip, and takes as long as the backfill. If a run stops, the next run continues.
+
+TripIt gives a new `it_session_id` value to each new session, with an expiry of 15 days. The refresh writes the newest value to `data/.tripit-session` with mode `0600`, and uses that file before `TRIPIT_SESSION`. Run the refresh at least once every 15 days. If TripIt rejects both values, the run exits with `1`: copy a new value into `TRIPIT_SESSION`. The file gives full access to your TripIt account, so do not share the data folder. A sign-out in the browser does not stop the value.
+
 ## Limits
 
-The feed holds the last 90 days and all future trips. A plan's detail from the feed is free text; the structured fields come from the backfill.
+The feed holds the last 90 days and all future trips. A plan's detail from the feed is free text; the structured fields come from the backfill and the JSON refresh.
 
 ## Development
 

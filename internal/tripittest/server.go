@@ -24,6 +24,8 @@ type Server struct {
 	unauthorizedRemaining int
 	trips                 []json.RawMessage
 	tripConfigs           map[string]*tripConfig
+	rejectedSessions      map[string]bool
+	paths                 []string
 }
 
 // tripConfig holds the responses of the detail route and the download
@@ -44,8 +46,9 @@ type feedResponse struct {
 // New starts a fake TripIt server. The caller must call Close.
 func New() *Server {
 	s := &Server{
-		feed:        feedResponse{status: http.StatusOK},
-		tripConfigs: make(map[string]*tripConfig),
+		feed:             feedResponse{status: http.StatusOK},
+		tripConfigs:      make(map[string]*tripConfig),
+		rejectedSessions: make(map[string]bool),
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
@@ -115,6 +118,29 @@ func (s *Server) BlockDownload(uuid string) {
 	s.trip(uuid).blocked = true
 }
 
+// RejectSession makes a web API v2 request that sends value as
+// it_session_id, and no session_id, get 500. TripIt returns 500 for an
+// it_session_id value that it does not accept.
+func (s *Server) RejectSession(value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rejectedSessions[value] = true
+}
+
+// RenewedSession returns the it_session_id value that the server sets in
+// response to a request that sent value.
+func RenewedSession(value string) string {
+	return "renewed-" + value
+}
+
+// Paths returns the path of each request that the server received, in
+// order.
+func (s *Server) Paths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.paths...)
+}
+
 // trip returns the tripConfig of uuid, and adds one when there is none. The
 // caller holds s.mu.
 func (s *Server) trip(uuid string) *tripConfig {
@@ -128,6 +154,14 @@ func (s *Server) trip(uuid string) *tripConfig {
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+
+	s.mu.Lock()
+	s.paths = append(s.paths, path)
+	s.mu.Unlock()
+
+	if strings.HasPrefix(path, "/api/v2/") && s.handleSession(w, r) {
+		return
+	}
 
 	switch {
 	case strings.HasPrefix(path, "/feed/ical/private/") && strings.HasSuffix(path, "/tripit.ics"):
@@ -162,6 +196,32 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleSession applies the "Keep me signed in" rule of TripIt to a request
+// that sends it_session_id and no session_id: the response sets a new
+// session_id and a new it_session_id. A value that RejectSession names gets
+// 500 instead. It returns true when it wrote the whole response.
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) bool {
+	remembered, err := r.Cookie("it_session_id")
+	if err != nil {
+		return false
+	}
+	if _, err := r.Cookie("session_id"); err == nil {
+		return false
+	}
+
+	s.mu.Lock()
+	rejected := s.rejectedSessions[remembered.Value]
+	s.mu.Unlock()
+	if rejected {
+		w.WriteHeader(http.StatusInternalServerError)
+		return true
+	}
+
+	http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "session-" + remembered.Value, Path: "/", HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: "it_session_id", Value: RenewedSession(remembered.Value), Path: "/", MaxAge: 15 * 24 * 60 * 60, HttpOnly: true})
+	return false
 }
 
 // consumeUnauthorized writes a 401 and returns true when the server still

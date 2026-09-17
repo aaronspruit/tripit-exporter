@@ -5,6 +5,9 @@ metadata:
 type: Opaque
 stringData:
   TRIPIT_FEED_URL: "https://www.tripit.com/feed/ical/private/your-key/tripit.ics"
+  # The value of the TripIt cookie it_session_id, for the JSON refresh. See
+  # "Refresh the trip JSON" in the README.
+  # TRIPIT_SESSION: ""
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -20,7 +23,9 @@ spec:
   startingDeadlineSeconds: 3600
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 300
+      # With the JSON refresh on, a throttled TripIt request can wait 15
+      # minutes before the run continues.
+      activeDeadlineSeconds: 1800
       backoffLimit: 2
       ttlSecondsAfterFinished: 86400
       template:
@@ -66,6 +71,15 @@ spec:
                     secretKeyRef:
                       name: tripit-credentials
                       key: TRIPIT_FEED_URL
+                # To turn on the JSON refresh, remove the comment marks here
+                # and in the Secret.
+                # - name: TRIPIT_JSON_REFRESH
+                #   value: "true"
+                # - name: TRIPIT_SESSION
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: tripit-credentials
+                #       key: TRIPIT_SESSION
               volumeMounts:
                 - name: data-storage
                   mountPath: /data
