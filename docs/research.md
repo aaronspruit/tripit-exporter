@@ -113,7 +113,7 @@ GET https://www.tripit.com/trip/download/uuid/<trip uuid>/tripit_Jun15_to_Jun18.
 
 The operator exported the June 2026 trip on 2026-09-14 and compared it with the feed. The events were the same as the feed events: the same `UID`, `SUMMARY`, `DESCRIPTION`, times and `GEO`. Only the calendar header was different. The export adds `METHOD:PUBLISH`, puts the trip name in `X-WR-CALNAME` and `X-WR-CALDESC`, and has no `X-PUBLISHED-TTL`.
 
-The backfill therefore downloads the events of each trip from this URL, and it makes no events of its own. This also gives the check-in and check-out events, whose `UID` values are not in the v2 objects. The URL accepts a client that is not a browser only when it sends the headers of a browser (read [Web API v2](#web-api-v2)), so the backfill sends them. If TripIt blocks the download, the backfill makes the events from the v2 objects.
+The backfill therefore downloads the events of each trip from this URL, and it makes no events of its own. This also gives the check-in and check-out events, whose `UID` values are not in the v2 objects. The URL accepts a client that is not a browser only when it sends the headers of a browser (read [Web API v2](#web-api-v2)), so the backfill sends them. If TripIt blocks the download, the backfill keeps the v2 objects of the trip with no events, and phase 4 of [the plan](plan.md#phase-4-events-from-the-v2-objects) makes the events from them.
 
 ### API v1
 
@@ -129,7 +129,7 @@ The build makes one static binary with `CGO_ENABLED=0`. The image is `gcr.io/dis
 | Variable | Description |
 |---|---|
 | `TRIPIT_FEED_URL` | The private feed URL. It is a secret |
-| `OUTPUT_DIR` | Folder for the output files |
+| `OUTPUT_DIR` | Folder for the output files, `/data` by default |
 
 `tripit-exporter` with no argument is the scheduled run, and it reads the feed. `tripit-exporter backfill` is the one-time backfill, and it prompts for the cookie.
 
@@ -157,6 +157,35 @@ Answer these with the real account:
 
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
 2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
+
+The client sends the headers of a Firefox 155 request on the TripIt website
+with every request: the website's own API call for a web API v2 route
+(`X-TRIPIT-APP-INFO`, `Sec-Fetch-Mode: cors`), and a browser navigation for
+the download URL (`Upgrade-Insecure-Requests` and the four `Sec-Fetch-*`
+headers). It sends `<trip uuid>.ics` as the file name. The website request
+also holds `X-CSRF-Token-WA` and two Dynatrace headers, `x-dtpc` and
+`x-dtreferer`; the client leaves them out, because a GET works without them.
+
+On 2026-09-16 the operator ran the backfill in Docker on the operator
+machine, which has the same public address as the browser. The download
+returned the events of two trips with that header set and that file name.
+The run did not test a smaller header set, a different address, or a
+different file name, so questions 1 and 2 stay open for those cases.
+
+The same run listed 191 trips, then TripIt sent a TCP reset to the detail
+request of the third trip, about 10 seconds and 12 requests after the
+first request. A second run started a few minutes later. The list request
+for page 4 got no response for 60 seconds, after only 4 requests. TripIt
+therefore throttles by the requests of the last few minutes, and a stalled
+request is a second form of the same throttle. The client waits 5 seconds
+before each request, and it waits out a throttled request inside the run.
+The client applies the Akamai `Set-Cookie` headers to its next request, as a
+browser does. In a third run with verbose mode, TripIt held a request with no response
+twice: after 51 and after 57 requests in the previous 10 minutes. The last
+response before each stall was a normal `200`, with no `Retry-After` and no
+rate-limit header. Each stall ended after about 3 minutes and 50 seconds. The
+limit is therefore about 50 requests in 10 minutes, and TripIt shows it only
+as a request that gets no response.
 
 ## Sources
 

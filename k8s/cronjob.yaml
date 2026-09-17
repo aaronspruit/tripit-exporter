@@ -61,8 +61,6 @@ spec:
                 seccompProfile:
                   type: RuntimeDefault
               env:
-                - name: OUTPUT_DIR
-                  value: /data
                 - name: TRIPIT_FEED_URL
                   valueFrom:
                     secretKeyRef:

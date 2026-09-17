@@ -51,12 +51,16 @@ Then add a line such as this to the crontab of the user who owns the output fold
 0 */6 * * * TRIPIT_FEED_URL=... OUTPUT_DIR=/path/to/data /path/to/tripit-exporter
 ```
 
-## Configuration
+## Environment variables
 
-| Variable | Default | `/run/secrets` name | Description |
-|---|---|---|---|
-| `TRIPIT_FEED_URL` | none, required | `tripit_feed_url` | The private feed URL |
-| `OUTPUT_DIR` | none, required | | Folder for the archive |
+| Variable | Used by | Required | Default | `/run/secrets` name | Description |
+|---|---|---|---|---|---|
+| `TRIPIT_FEED_URL` | Feed run | Yes | none | `tripit_feed_url` | The private feed URL. Treat it as a credential |
+| `OUTPUT_DIR` | Feed run, backfill | No | `/data` | | The folder for the archive |
+| `TRIPIT_USER_AGENT` | Backfill | No | Firefox 155 on Windows | | The `User-Agent` of the browser you copy the cookie from. The backfill sends it with every request |
+| `TRIPIT_VERBOSE` | Backfill | No | `false` | | When `true`, the backfill shows each request and response, with a timestamp. The cookie values stay hidden |
+
+The backfill reads the session cookie from its prompt, and never from an environment variable.
 
 A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority over the matching environment variable.
 
@@ -66,7 +70,7 @@ A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority ov
 data/
 ├── tripit.ics              the events of every trip in the archive
 └── trips/
-    ├── <trip uuid>.json    one trip: its events, and its v2 objects once the backfill exists
+    ├── <trip uuid>.json    one trip: its events, and its v2 objects once the backfill has read it
     └── <trip uuid>.ics     the events of one trip
 ```
 
@@ -77,12 +81,24 @@ Each run merges the feed into the archive by event `UID`, and it ignores a chang
 | Code | Reason |
 |---|---|
 | `0` | Success, or a `429` rate limit. The next run continues |
-| `1` | The feed URL is wrong or revoked. Copy a new one from TripIt |
+| `1` | The feed URL is wrong or revoked, or the backfill cookie is invalid. Get a new one |
 | `2` | Any other error |
+
+## Backfill
+
+Run the backfill once, to add the trips outside the feed window, and the structured fields of every trip:
+
+1. In a browser, sign in to TripIt with your TripIt email and password, and select "Keep me signed in". The cookie then stays valid if you must run the backfill again later. The box has no effect when you sign in with Google or another outside account.
+2. Open the developer tools, and open the Network tab. Load a TripIt page, and select a request to `www.tripit.com`. Copy the full value of its `Cookie` request header. The backfill needs all the cookies in that header, and not the session cookie alone. If your browser is not Firefox 155 on Windows, also copy the `User-Agent` request header into `TRIPIT_USER_AGENT`.
+3. Run `docker compose run --rm -it tripit-exporter backfill`.
+4. Paste the cookie at the prompt, then press Enter. The terminal does not show it, and the archive does not store it.
+5. When the backfill shows `done`, sign out of TripIt in the browser. This ends the session that the copied cookie belongs to.
+
+TripIt accepts about 50 requests in 10 minutes, and the backfill sends two for each trip, so 200 trips take about 80 minutes. When TripIt holds a request with no response, the backfill shows a line and waits up to 8 minutes before it tries again. The backfill writes each trip file as soon as it finishes that trip. If it stops, run it again: it skips each trip that already has its structured fields and its events, so it picks up where it left off. If TripIt blocks the download of a trip, or sends a calendar that the backfill cannot read, the backfill shows a warning, keeps the structured fields of that trip, and continues. The next run tries that download again.
 
 ## Limits
 
-The feed holds the last 90 days and all future trips. A plan's detail is free text; the structured fields come from the backfill, once it exists.
+The feed holds the last 90 days and all future trips. A plan's detail from the feed is free text; the structured fields come from the backfill.
 
 ## Development
 

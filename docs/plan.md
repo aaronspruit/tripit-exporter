@@ -255,7 +255,7 @@ The merge follows [the rules in research.md](research.md#calendar-feed). The pla
 ### Deployment files
 
 1. `compose.yaml` with `user: "65532:65532"` and the volume `./data:/data`.
-2. `.env.example` with `TRIPIT_FEED_URL` and `OUTPUT_DIR=/data`.
+2. `.env.example` with `TRIPIT_FEED_URL`. `OUTPUT_DIR` defaults to `/data`.
 3. `k8s/cronjob.yaml`, copied from garmin-activities-download. It has a Secret for the feed URL and no token volume. The schedule is every 6 hours. TripIt refreshes the feed every 15 minutes, and a trip changes less often than that.
 
 ### Tests
@@ -298,20 +298,20 @@ Before you write the client, answer open questions 1 and 4 of the research with 
 2. The client sends the full browser header set to the download URL. The set is a fixed list in the code.
 3. A helper turns a JSON value that is an object into an array of one. Each plan list goes through it.
 4. The client removes a duplicate object by its `uuid`.
-5. The client waits 1 second between two trips.
+5. The client waits 5 seconds before each request after the first. Each request stops after 20 seconds. The client applies each `Set-Cookie` header to the cookie of its next request.
 6. A `401` gets one retry after 5 seconds. A second `401` stops the run with exit code `1`.
-7. A `429`, or an HTTP/2 protocol error, stops the run with exit code `0`. The next run continues.
+7. A `429`, an HTTP/2 protocol error, a TCP reset, or a request that stops after 20 seconds gets a retry after 1, 2, 4, then 8 minutes. If TripIt still throttles the request, the run stops with exit code `0`, and the next run continues.
 
 ### The command
 
 `tripit-exporter backfill`:
 
-1. Prompts for the cookie. If the input is a terminal, the prompt turns off the echo with the Linux `ioctl` from the `syscall` package. The cookie never goes to a file or to a log.
+1. Prompts for the cookie. If the input is a terminal, the prompt turns off the echo and canonical mode with the Linux `ioctl` from the `syscall` package. Canonical mode cuts a line at 4095 bytes, and a full `Cookie` header can be longer. The cookie never goes to a file or to a log.
 2. Calls `/api/v2/get/profile`. A `401` stops the run with exit code `1` before any trip request.
 3. Lists all trips, with `past=true&traveler=all` and `past=false&traveler=true`.
-4. Skips each trip whose file already holds `v2`. A second run therefore continues where the first run stopped.
+4. Skips each trip whose file already holds `v2` and either events or `empty_download: true`. A second run therefore continues where the first run stopped, and tries a failed download again.
 5. Reads the detail of each other trip, and stores the response in `v2` as it was read.
-6. Downloads the ICS of a trip that has no events, and adds the events with `in_feed: false`.
+6. Downloads the ICS of a trip that has no events, and adds the events with `in_feed: false`. If the download returns a status other than `200` or `429`, or a calendar that does not parse, the run writes a warning, keeps `v2` with no events, and continues. A download that holds zero events sets `empty_download: true`.
 7. Writes each trip file when it finishes that trip, and not at the end of the run.
 
 The feed run sets `in_feed: true` on a backfilled trip when the feed holds the trip.
@@ -324,10 +324,14 @@ The fake server gains the v2 routes and the download route. It returns `403` fro
 |---|---|
 | A plan list with one object gives an array of one | Table |
 | A plan in two shared trips is stored once | Table |
-| Paging reads each page up to `max_page` | Fake server |
+| Paging reads each page up to `max_page`, and waits the pace before each page after the first | Fake server |
 | A `401` then a `200` succeeds. Two `401` responses exit with `1` | Fake server |
 | A `429` in the middle exits with `0`, and the trips before it are on disk | Scenario |
-| A second run skips the trips that have `v2` | Scenario |
+| A second run skips the trips that have `v2` and events, or `v2` and an empty download | Scenario |
+| A trip file with `v2`, no events and no `empty_download` key gets the download | Scenario |
+| A blocked download, or a calendar that does not parse, keeps `v2`, the run continues, and the next run tries the download again | Scenario |
+| A reset gets a retry after a wait. A reset or a stalled request on every retry exits with `0` | Fake server |
+| A trip UUID that is not safe as a file name gets a warning and no file | Scenario |
 | The download without the browser headers gets `403` | Fake server |
 | A backfilled trip with `in_feed: false` stays after a feed run that does not hold it | Scenario |
 | No output of any run holds the cookie | Table |
@@ -341,6 +345,25 @@ The fake server gains the v2 routes and the download route. It returns `403` fro
 ## Phase 4: events from the v2 objects
 
 Do this phase only if phase 3 finds that TripIt blocks the download. The backfill then makes each event of a trip from its v2 objects, with the `SUMMARY` and `DESCRIPTION` format of the feed. A flight event gets the `UID` from the `AirObject`. The v2 data has no `UID` for a check-in or a check-out event, so the backfill makes one from the lodging `uuid`. A later feed run then holds two events for the same stay inside the window. A merge rule for this case is a decision for this phase, and golden tests compare each made event with the export of the same trip.
+
+### Findings from the phase 3 backfill
+
+Do not start this phase while the download works. The phase 3 backfill of 2026-09-16 got the download for each trip, and a made event cannot keep the `UID` of the feed for half of the plan events. The one fact against this decision: a backfill with no download sends one request for each trip instead of two, so it takes half the time under the limit of about 50 requests in 10 minutes that [the research](research.md#open-questions) records.
+
+The comparison used 70 trips, with 70 trip events and 421 plan events, and compared each downloaded event with the v2 objects of its trip.
+
+| Event data | In the v2 objects |
+|---|---|
+| Trip event `UID` | Yes: the trip `uuid` |
+| Flight event `UID` | Yes: `item-<Segment uuid>`, 215 of the 421 plan events |
+| `UID` of a lodging, car or parking event | No. 206 of the 421 plan events: 75 check-in, 75 check-out, 27 car pick-up, 27 car drop-off, 1 parking arrival, 1 parking departure |
+| Numeric trip ID in each `DESCRIPTION` link | No. A made link must use `/trip/show/uuid/<uuid>` |
+| `GEO` | Not exactly. A flight event carries the coordinates of a city, and v2 holds only the airport coordinates. A lodging `GEO` has 7 decimal places, and the v2 `Address` has 6 |
+| `SUMMARY`, `LOCATION` | Yes: the trip `display_name` and `primary_location`, the flight `<airline code><number> <from> to <to>`, and `Check-in: <lodging display_name>` |
+| `DTSTART`, `DTEND` | Yes: `date`, `time` and `utc_offset`. A check-in or check-out event lasts one hour. The trip `DTEND` is the day after `end_date` |
+| Gate, terminal, phone and traveler name in `DESCRIPTION` | Yes |
+
+The v2 objects also hold data that no event holds: confirmation numbers, seats, cost, and the booking site.
 
 ## Out of scope
 

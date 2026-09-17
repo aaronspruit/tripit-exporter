@@ -83,15 +83,12 @@ func TestRunFeedMissingFeedURL(t *testing.T) {
 	}
 }
 
-func TestRunFeedMissingOutputDir(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run(nil, map[string]string{"TRIPIT_FEED_URL": "https://example.com/feed"}, strings.NewReader(""), &stdout, &stderr, testNow)
-
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
+func TestOutputDirDefaultsToData(t *testing.T) {
+	if got := outputDir(nil); got != "/data" {
+		t.Fatalf("outputDir(nil) = %q, want /data", got)
 	}
-	if !strings.Contains(stderr.String(), "OUTPUT_DIR") {
-		t.Fatalf("stderr = %q, want it to name OUTPUT_DIR", stderr.String())
+	if got := outputDir(map[string]string{"OUTPUT_DIR": "/archive"}); got != "/archive" {
+		t.Fatalf("outputDir() = %q, want /archive", got)
 	}
 }
 

@@ -41,6 +41,10 @@ type Trip struct {
 	InFeed bool            `json:"in_feed"`
 	Events []Event         `json:"events"`
 	V2     json.RawMessage `json:"v2"`
+	// EmptyDownload is true when the backfill downloaded the events of the
+	// trip and the download held none. An absent key reads as false, so a
+	// trip with no events and no key gets the download again.
+	EmptyDownload bool `json:"empty_download,omitempty"`
 }
 
 // Load reads every trip file under dir/trips. A missing dir/trips is not an
@@ -108,6 +112,9 @@ var tripIDPattern = regexp.MustCompile(`tripit\.com/trip/show(?:\?id=|/id/)(\d+)
 // never reach Write.
 var tripUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
+// ValidTripUUID reports whether uuid is safe as a trip file name.
+func ValidTripUUID(uuid string) bool { return tripUUIDPattern.MatchString(uuid) }
+
 // Merge applies one fetch's events onto trips, following the calendar feed
 // rules of docs/research.md and docs/plan.md. It mutates trips in place and
 // returns a warning for each plan event whose trip is absent from events.
@@ -130,14 +137,14 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 				continue
 			}
 			tripEvents[tripUUID] = e
-			if id := tripIDOf(e); id != "" {
+			if id := TripIDOf(e); id != "" {
 				tripIDToUUID[id] = tripUUID
 			}
 		}
 	}
 
 	for _, e := range plans {
-		id := tripIDOf(e)
+		id := TripIDOf(e)
 		if id == "" {
 			continue
 		}
@@ -158,7 +165,7 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 			trips[tripUUID] = trip
 		}
 
-		trip.TripID = tripIDOf(tripEvent)
+		trip.TripID = TripIDOf(tripEvent)
 		trip.Start = dateValue(tripEvent.DTStart())
 		trip.End = dateValue(dtEnd(tripEvent))
 		trip.InFeed = true
@@ -248,7 +255,9 @@ func descriptionOf(e ics.Event) string {
 	return p.Raw
 }
 
-func tripIDOf(e ics.Event) string {
+// TripIDOf returns the numeric trip ID in the TripIt link of the DESCRIPTION
+// of e, or "" when e holds no link.
+func TripIDOf(e ics.Event) string {
 	m := tripIDPattern.FindStringSubmatch(descriptionOf(e))
 	if m == nil {
 		return ""
