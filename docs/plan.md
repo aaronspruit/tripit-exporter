@@ -365,6 +365,8 @@ The comparison used 70 trips, with 70 trip events and 421 plan events, and compa
 
 The v2 objects also hold data that no event holds: confirmation numbers, seats, cost, and the booking site.
 
+No other v2 call gives the missing `UID` values. A TripIt ID has the form `<8 hex>-<4 hex>-9000-<kind>-<12 hex number>`, and a lodging, car or parking event `UID` is kind `0003`, a segment. The v2 objects hold no segment `uuid` for these plans, and the first part of the ID looks random, so the `UID` cannot be calculated from the object `uuid`. On 2026-09-17 a search of every response in the Network tab of the TripIt website, on a trip with a hotel and a car rental, did not find the check-in `UID` in any form. The mobile app API was not tested.
+
 ## Out of scope
 
 1. A scheduled run of web API v2. The session lifetime is not known.
