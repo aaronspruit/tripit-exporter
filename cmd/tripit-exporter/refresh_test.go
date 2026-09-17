@@ -188,6 +188,72 @@ func TestRefreshRejectedSavedSessionFallsBackToTripitSession(t *testing.T) {
 	}
 }
 
+func TestRefreshSavedSessionWithTwo401sFallsBackToTripitSession(t *testing.T) {
+	s := newRefreshServer(t)
+	// The profile request of the saved value gets a 401, and the one retry
+	// gets the second 401, so the value becomes an *AuthError.
+	s.SetUnauthorizedCount(2)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, sessionFile), []byte("saved-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, refreshEnv(s, dir), strings.NewReader(""), &stdout, &stderr, testNow); code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+
+	if got, want := readSessionFile(t, dir), tripittest.RenewedSession(testSession)+"\n"; got != want {
+		t.Fatalf("state file = %q, want %q", got, want)
+	}
+	if !strings.Contains(stdout.String(), "TripIt rejected the saved session") {
+		t.Fatalf("stdout = %q, want the rejected line", stdout.String())
+	}
+}
+
+func TestRefreshProfileErrorThatIsNotARejectionStopsAtTheFirstValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		want   int
+	}{
+		{"rate limit", http.StatusTooManyRequests, 0},
+		{"other status", http.StatusServiceUnavailable, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newRefreshServer(t)
+			s.SetProfileStatus(tt.status)
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, sessionFile), []byte("saved-value\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			if code := run(nil, refreshEnv(s, dir), strings.NewReader(""), &stdout, &stderr, testNow); code != tt.want {
+				t.Fatalf("exit code = %d, want %d, stderr = %q", code, tt.want, stderr.String())
+			}
+
+			// The error is not a rejection, so the run keeps the saved value
+			// and sends no request with TRIPIT_SESSION.
+			if got, want := readSessionFile(t, dir), "saved-value\n"; got != want {
+				t.Fatalf("state file = %q, want %q", got, want)
+			}
+			if strings.Contains(stdout.String(), "TripIt rejected") {
+				t.Fatalf("stdout = %q, want no rejected line", stdout.String())
+			}
+			for _, p := range s.Paths() {
+				if p == "/api/v2/list/trip" {
+					t.Fatal("the run listed the trips after a profile error")
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "trips", "trip-1.json")); err != nil {
+				t.Fatalf("the feed merge must stay on disk: %v", err)
+			}
+		})
+	}
+}
+
 func TestRefreshEveryRejectedSessionExitsOneAndKeepsTheFeedMerge(t *testing.T) {
 	s := newRefreshServer(t)
 	s.RejectSession(testSession)

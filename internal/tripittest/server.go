@@ -22,6 +22,7 @@ type Server struct {
 	feed feedResponse
 
 	unauthorizedRemaining int
+	profileStatus         int
 	trips                 []json.RawMessage
 	tripConfigs           map[string]*tripConfig
 	rejectedSessions      map[string]bool
@@ -77,6 +78,16 @@ func (s *Server) SetUnauthorizedCount(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.unauthorizedRemaining = n
+}
+
+// SetProfileStatus makes the profile route return status for every
+// request, with no body. A test uses it for a status that the other
+// setters do not give, such as 429 or 503. A status of 0 puts the route
+// back to its normal response.
+func (s *Server) SetProfileStatus(status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileStatus = status
 }
 
 // SetTrips sets the trips that the list route pages through, page_size 50
@@ -174,6 +185,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	case path == "/api/v2/get/profile":
 		if s.consumeUnauthorized(w) {
+			return
+		}
+		s.mu.Lock()
+		status := s.profileStatus
+		s.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
 			return
 		}
 		writeJSON(w, `{"Profile":{}}`)

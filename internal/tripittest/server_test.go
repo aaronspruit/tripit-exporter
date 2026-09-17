@@ -103,6 +103,31 @@ func TestServerUnauthorizedCountAppliesOnceThenClears(t *testing.T) {
 	}
 }
 
+func TestServerProfileStatus(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.SetProfileStatus(http.StatusServiceUnavailable)
+
+	resp, err := http.Get(s.URL + "/api/v2/get/profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	s.SetProfileStatus(0)
+	back, err := http.Get(s.URL + "/api/v2/get/profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = back.Body.Close()
+	if back.StatusCode != http.StatusOK {
+		t.Fatalf("status after 0 = %d, want %d", back.StatusCode, http.StatusOK)
+	}
+}
+
 func TestServerListTripRoutePages(t *testing.T) {
 	s := New()
 	defer s.Close()
