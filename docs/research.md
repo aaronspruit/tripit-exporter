@@ -117,6 +117,8 @@ No program can log in with the email and password. On 2026-09-17, a Go client wi
 
 Thus `it_session_id` alone makes a session, and each new session gives a new value with 15 more days. An old value stays valid after TripIt replaces it, at least for some minutes. A fake `it_session_id` value gets `500`.
 
+A sign-out does not stop `it_session_id`. On 2026-09-17, the operator logged in with "Keep me signed in" in a private Firefox window, copied the `Cookie` header, and signed out. 5 to 10 minutes later, `it_session_id` alone got `200` and a new value. The full header also got a new `session_id` and a new `it_session_id`, so the sign-out stopped `session_id` only.
+
 The v2 detail response holds `timestamp`, which changes with each request. In the operator archive, 59 of the 70 trips that hold plan objects have an object with a `last_modified` that is newer than the `last_modified` of the trip, by a median of 530 days. Thus the `last_modified` of a trip does not show a change to its plans, and only the detail of a trip shows a change.
 
 ### Export trip to calendar
@@ -173,8 +175,7 @@ Answer these with the real account:
 
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
 2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
-3. Does a sign-out in the browser stop the `it_session_id` value that a person copied from that browser? Which status does TripIt return for a value that it stopped?
-4. Does TripIt reject an `it_session_id` value after its 15 days, when no new session used it? The value from the login of 2026-09-17 02:43 GMT expires on 2026-10-02 at 02:43 GMT.
+3. Does TripIt reject an `it_session_id` value after its 15 days, when no new session used it? Which status does TripIt return for a rejected value? [Issue 19](https://github.com/aaronspruit/tripit-exporter/issues/19) holds the test.
 
 The client sends the headers of a Firefox 155 request on the TripIt website
 with every request: the website's own API call for a web API v2 route

@@ -380,9 +380,9 @@ The reasons:
 
 The fact against it: the state file holds a value that gives full access to the TripIt account, in the output folder. The one-time backfill keeps the cookie out of every file.
 
-### Answer the open questions first
+### The open question
 
-Before you write the code, answer [open question 3](research.md#open-questions) with the real account. The answer decides the setup steps in the README: if a sign-out stops the value, the person closes the browser and does not sign out. It also decides the status that the refresh reads as a rejected value. Open question 4 does not block this phase.
+[Open question 3](research.md#open-questions) does not block this phase. The only rejected value that a test saw got `500`, so the refresh reads a `401` after the retry, or a `500`, from the profile request as a rejected value. If the answer to question 3 gives another status, change this rule.
 
 ### The variables
 
@@ -397,10 +397,11 @@ A user does not know the TripIt API version, so the variable names and the READM
 ### The session
 
 1. The refresh reads the value from `<OUTPUT_DIR>/.tripit-session` first, then from `TRIPIT_SESSION`. It skips an empty value, and a value that is the same as the one before.
-2. For each value, the client sends `it_session_id=<value>` to `/api/v2/get/profile`. A rejected value goes to the next value. When no value remains, the run exits with `1`.
+2. For each value, the client sends `it_session_id=<value>` to `/api/v2/get/profile`. A rejected value goes to the next value. When no value remains, the run exits with `1`. A TripIt outage that returns `500` therefore also exits with `1`.
 3. After the profile request, and at the end of the run, the refresh writes the current `it_session_id` of the client to the state file with mode `0600`. It writes only when the value changed, with a temporary file and `os.Rename`, as the archive does.
 4. `tripitweb.Client` gets `CookieValue(name string) string`, which returns the current value of one cookie. The package writes no cookie to a file.
-5. No log line, error message or archive file holds the value. With `TRIPIT_VERBOSE=true`, the lines hide it, as they hide the backfill cookie.
+5. The README setup tells the person to copy `it_session_id` alone. A sign-out in the browser does not stop the value, so the person can sign out after the copy. The README backfill steps must not say that a sign-out ends the copied cookie, because `it_session_id` stays valid.
+6. No log line, error message or archive file holds the value. With `TRIPIT_VERBOSE=true`, the lines hide it, as they hide the backfill cookie.
 
 ### The trips
 
