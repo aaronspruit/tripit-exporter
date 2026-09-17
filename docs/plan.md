@@ -4,7 +4,7 @@ This plan builds the design in [research.md](research.md). Read that file for th
 
 ## Recommendation
 
-Build the project in five phases, and put the CI and the test harness before the first feature:
+Build the project in six phases, and put the CI and the test harness before the first feature:
 
 | Phase | Result | Release |
 |---|---|---|
@@ -13,6 +13,7 @@ Build the project in five phases, and put the CI and the test harness before the
 | 2 | The scheduled feed run and the archive | `v0.1.0` |
 | 3 | The one-time backfill | `v0.2.0` |
 | 4 | Events made from the v2 objects. Do this phase only if phase 3 finds that TripIt blocks the download | `v0.2.x` |
+| 5 | The scheduled v2 refresh, an option that is off by default | `v0.3.0` |
 
 The reasons:
 
@@ -367,9 +368,83 @@ The v2 objects also hold data that no event holds: confirmation numbers, seats, 
 
 No other v2 call gives the missing `UID` values. A TripIt ID has the form `<8 hex>-<4 hex>-9000-<kind>-<12 hex number>`, and a lodging, car or parking event `UID` is kind `0003`, a segment. The v2 objects hold no segment `uuid` for these plans, and the first part of the ID looks random, so the `UID` cannot be calculated from the object `uuid`. On 2026-09-17 a search of every response in the Network tab of the TripIt website, on a trip with a hotel and a car rental, did not find the check-in `UID` in any form. The mobile app API was not tested.
 
+## Phase 5: the scheduled v2 refresh
+
+The scheduled run can also read web API v2, so that the archive keeps the structured fields of each trip current. The refresh is off by default. It uses the "Keep me signed in" value `it_session_id`, and it keeps each new value that TripIt returns in a state file. [The research](research.md#login-and-session-lifetime) holds the facts that this design uses.
+
+The reasons:
+
+1. `it_session_id` alone makes a session, and each new session gives a new value with 15 more days. A daily run therefore keeps the session with no person, no password and no browser.
+2. The newest value always has 15 days left. The state file works if TripIt rejects old values and also if it does not.
+3. The refresh uses the client and the archive of phase 3. The image stays a static binary that uses only the standard library.
+
+The fact against it: the state file holds a value that gives full access to the TripIt account, in the output folder. The one-time backfill keeps the cookie out of every file.
+
+### Answer the open questions first
+
+Before you write the code, answer [open question 3](research.md#open-questions) with the real account. The answer decides the setup steps in the README: if a sign-out stops the value, the person closes the browser and does not sign out. It also decides the status that the refresh reads as a rejected value. Open question 4 does not block this phase.
+
+### The variables
+
+| Variable | `/run/secrets` name | Default | Description |
+|---|---|---|---|
+| `TRIPIT_V2_REFRESH` | | `false` | When `true`, the scheduled run does the refresh after the feed merge |
+| `TRIPIT_V2_REFRESH_DAYS` | | `7` | The refresh reads a trip again only when the trip ends on or after this number of days before the run, or has no end date |
+| `TRIPIT_SESSION` | `tripit_session` | none | The first `it_session_id` value. The refresh reads it only when the state file is absent or rejected |
+
+### The session
+
+1. The refresh reads the value from `<OUTPUT_DIR>/.tripit-session` first, then from `TRIPIT_SESSION`. It skips an empty value, and a value that is the same as the one before.
+2. For each value, the client sends `it_session_id=<value>` to `/api/v2/get/profile`. A rejected value goes to the next value. When no value remains, the run exits with `1`.
+3. After the profile request, and at the end of the run, the refresh writes the current `it_session_id` of the client to the state file with mode `0600`. It writes only when the value changed, with a temporary file and `os.Rename`, as the archive does.
+4. `tripitweb.Client` gets `CookieValue(name string) string`, which returns the current value of one cookie. The package writes no cookie to a file.
+5. No log line, error message or archive file holds the value. With `TRIPIT_VERBOSE=true`, the lines hide it, as they hide the backfill cookie.
+
+### The trips
+
+The refresh lists all trips, as the backfill does. It reads the detail of a trip when one of these is true:
+
+1. The archive holds no `v2` object for the trip. The refresh then does the full backfill of that trip, with the download, at any age.
+2. The trip holds `v2`, no events and no `empty_download: true`. The refresh tries the download again.
+3. The `end` of the trip is on or after the run date minus `TRIPIT_V2_REFRESH_DAYS` days, or the trip has no `end`.
+
+The `last_modified` of a trip does not show a change to its plans, so the refresh reads the detail of each trip in the window. The refresh does not download the events of a trip that holds events, because the feed holds the events of each trip that ended in the last 83 days. A window of more than 83 days refreshes `v2` alone for the older trips.
+
+The refresh keeps the stored `v2` object when the new response differs from it only in the top-level `timestamp`. The archive therefore changes only when TripIt data changes. The refresh writes each trip file when it finishes that trip.
+
+### The run
+
+1. When `TRIPIT_V2_REFRESH` is `true` and no state file and no `TRIPIT_SESSION` exist, the run exits with `2` before any request. A value of `TRIPIT_V2_REFRESH_DAYS` that is not a whole number of `0` or more also exits with `2`.
+2. A feed error exits with its code, and the refresh does not run.
+3. After the feed merge, a refresh error sets the exit code: a rejected session gives `1`, a `*RateLimitedError` gives `0`, and each other error gives `2`.
+4. `k8s/cronjob.yaml` gets the optional `TRIPIT_SESSION` key in its Secret, `TRIPIT_V2_REFRESH` in a comment, and an `activeDeadlineSeconds` of `1800`, because a throttled request can wait 15 minutes. `.env.example` gets the three variables in comments.
+
+### Tests
+
+The fake server gains the session route behavior: a request with `it_session_id` and no `session_id` gets a new `session_id` and a new `it_session_id`, and a value that the test names gets the rejected status.
+
+| Test | Kind |
+|---|---|
+| With `TRIPIT_V2_REFRESH` absent, the run sends no v2 request | Scenario |
+| With the refresh on and no value, or a bad `TRIPIT_V2_REFRESH_DAYS`, the run exits with `2` and sends no request | Table |
+| The state file value comes before `TRIPIT_SESSION`, and the new value goes to the state file with mode `0600` | Scenario |
+| A rejected state file value, then an accepted `TRIPIT_SESSION`, replaces the state file | Scenario |
+| Two rejected values exit with `1`, and the feed merge stays on disk | Scenario |
+| A trip that ended before the window gets no request. A trip in the window, a future trip, and a trip with no `end` get the detail request | Scenario |
+| A trip older than the window with no `v2` gets the full backfill | Scenario |
+| A detail that differs only in `timestamp` writes no file | Scenario |
+| A throttle on each retry exits with `0`, and the trips before it are on disk | Scenario |
+| No output of any run holds the session value, and the state file is the only file that holds it | Table |
+
+### Phase 5 is complete when
+
+1. The operator turns on the refresh on the real deployment. A second run on the same day writes no trip file.
+2. A run on a later day passes with the value from the state file alone.
+3. You publish `v0.3.0`.
+
 ## Out of scope
 
-1. A scheduled run of web API v2. The session lifetime is not known.
+1. A login with the email and password. Akamai blocks it without a browser that hides its automation ([research](research.md#login-and-session-lifetime)).
 2. The official API v1.
 3. The import of the archive into AirTrail. That work belongs to homek8.
 4. An image for more than one CPU architecture.
