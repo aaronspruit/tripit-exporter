@@ -6,7 +6,7 @@ type: Opaque
 stringData:
   TRIPIT_FEED_URL: "https://www.tripit.com/feed/ical/private/your-key/tripit.ics"
   # The value of the TripIt cookie it_session_id, for the JSON refresh. See
-  # "Refresh the trip JSON" in the README.
+  # "Part 2: the full history" in the README.
   # TRIPIT_SESSION: ""
 ---
 apiVersion: batch/v1
