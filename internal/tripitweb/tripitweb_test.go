@@ -354,6 +354,49 @@ func TestSetCookieUpdatesTheNextRequest(t *testing.T) {
 	}
 }
 
+func TestCookieValueFollowsSetCookie(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "it_session_id", Value: "new"})
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Cookie: "it_session_id=old; other=x", Sleep: func(time.Duration) {}}
+	if got := client.CookieValue("it_session_id"); got != "old" {
+		t.Fatalf("CookieValue before a request = %q, want old", got)
+	}
+	if err := client.Profile(context.Background()); err != nil {
+		t.Fatalf("Profile: %v", err)
+	}
+	if got := client.CookieValue("it_session_id"); got != "new" {
+		t.Fatalf("CookieValue after Set-Cookie = %q, want new", got)
+	}
+	if got := client.CookieValue("missing"); got != "" {
+		t.Fatalf("CookieValue(missing) = %q, want empty", got)
+	}
+}
+
+func TestUnexpectedAPIStatusIsStatusError(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Sleep: func(time.Duration) {}}
+	err := client.Profile(context.Background())
+
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusInternalServerError {
+		t.Fatalf("Profile error = %v, want a *StatusError with status 500", err)
+	}
+	if got, want := err.Error(), "tripitweb: unexpected status 500 for /api/v2/get/profile"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+	if ExitCode(err) != 2 {
+		t.Fatalf("ExitCode = %d, want 2", ExitCode(err))
+	}
+}
+
 func TestEveryRequestSendsTheBrowserHeaders(t *testing.T) {
 	var got []http.Header
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

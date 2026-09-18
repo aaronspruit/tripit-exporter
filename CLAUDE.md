@@ -90,8 +90,9 @@ docker build -t tripit-exporter:test .
 ## Architecture
 
 `cmd/tripit-exporter` parses the subcommand. With no subcommand, it fetches
-the feed and updates the archive; `version` prints the version; `backfill`
-runs the one-time backfill.
+the feed and updates the archive, then runs the JSON refresh when
+`TRIPIT_JSON_REFRESH` is true; `version` prints the version; `backfill` runs
+the one-time backfill.
 
 | Package | Holds |
 |---|---|
@@ -103,7 +104,9 @@ runs the one-time backfill.
 
 The exit code order: a feed fetch error takes the code from
 [the table](README.md#exit-codes) before the archive runs at all. An archive
-error, for example a disk failure, exits with `2`.
+error, for example a disk failure, exits with `2`. A setting error of the
+refresh exits with `2` before the feed fetch. The refresh runs only after a
+successful merge, and its error takes the backfill codes.
 
 ## The archive
 
@@ -170,6 +173,32 @@ only in that prompt, in `Client.Cookie`, and in the cookie list that the
 client updates from each `Set-Cookie` header, as a browser does; it never reaches a file, a log
 line, or an error message.
 
+## The JSON refresh
+
+The user-facing names say "JSON" and never "v2", because a user does not
+know the TripIt API version.
+
+`cmd/tripit-exporter/refresh.go` opens a session with `it_session_id`
+alone: first the value in `<OUTPUT_DIR>/.tripit-session`, then
+`TRIPIT_SESSION`. TripIt answers a request with `it_session_id` and no
+`session_id` with a new `session_id` and a new `it_session_id` that expires
+in 15 days, so the refresh writes the value of `Client.CookieValue` to the
+state file after the profile request and at the end of the run. The state
+file is the only file that holds a TripIt credential. A `401` after the
+retry, or a `500`, from the profile request rejects a value, because TripIt
+returned `500` for a value that it did not accept; the refresh then tries
+the next value, and exits with `1` when none remains.
+`docs/research.md` holds the tests behind each of these rules.
+
+The refresh reads each trip that `needsBackfill` selects, and each trip
+whose `end` is on or after the run date minus
+`TRIPIT_JSON_REFRESH_LOOKBACK_DAYS` days, or empty. The `last_modified` of a trip does not change when its
+plans change, so the list cannot show a changed trip. A trip that holds
+events or `empty_download: true` gets no download, because the feed holds
+the events of each trip that ended in the last 83 days. `sameV2` ignores
+the top-level `timestamp` of a detail response, which changes with each
+request, so an unchanged trip writes no file.
+
 `TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`
 calls. It is empty in production; a test sets it to a fake server's URL.
 
@@ -180,7 +209,10 @@ calls. It is empty in production; a test sets it to a fake server's URL.
 golden file in the pull request diff. `internal/tripittest.New()` starts a
 fake TripIt server; a test sets the response of a route with `SetFeed`,
 `SetTrips`, `SetTripDetail` or `SetDownload` before it makes a request that
-reads that route. The download route returns `403` when the request holds
+reads that route. A web API v2 request with `it_session_id` and no
+`session_id` gets a new `session_id` and `RenewedSession(value)`, or `500`
+for a value that `RejectSession` names. `Paths` returns each request path,
+so a test can check which trips a run read. The download route returns `403` when the request holds
 no `Referer` header, the way TripIt rejects a request with no browser
 header, and for a UUID that `BlockDownload` names.
 

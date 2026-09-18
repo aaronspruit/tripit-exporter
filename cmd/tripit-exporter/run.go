@@ -47,7 +47,8 @@ func outputDir(env map[string]string) string {
 }
 
 // runFeed fetches the TripIt calendar feed and merges it into the archive
-// under outputDir(env). See docs/plan.md for the exit code table.
+// under outputDir(env). When TRIPIT_JSON_REFRESH is true, a successful merge
+// is followed by the JSON refresh. See docs/plan.md for the exit code table.
 func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int {
 	feedURL := secret.Read("tripit_feed_url", "TRIPIT_FEED_URL", env)
 	if feedURL == "" {
@@ -55,6 +56,11 @@ func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int
 		return 2
 	}
 	outputDir := outputDir(env)
+	refresh, err := readRefreshConfig(env, outputDir)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
+		return 2
+	}
 
 	calendar, rateLimited, err := feed.Fetch(context.Background(), http.DefaultClient, feedURL)
 	if err != nil {
@@ -74,5 +80,8 @@ func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int
 	for _, w := range warnings {
 		_, _ = fmt.Fprintln(stderr, "tripit-exporter: warning:", w)
 	}
-	return 0
+	if !refresh.enabled {
+		return 0
+	}
+	return runRefresh(env, outputDir, refresh, stdout, stderr, now)
 }

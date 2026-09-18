@@ -11,7 +11,7 @@ The reasons:
 1. The feed needs no login. The secret URL is the only credential, so a scheduled run never needs a person.
 2. An archive that merges the events by `UID` grows past 90 days, from the first run forward.
 3. The backfill fills the history before the first run. The web API is the only path that returns every trip with every field. The official API is closed to new applications, and basic auth needs a support request.
-4. A person runs the backfill one time, so the unknown lifetime of a session does not matter. A session that expires every few days makes a scheduled web API source a manual job.
+4. A person runs the backfill one time with a pasted cookie. A scheduled refresh of web API v2 is an option: the "Keep me signed in" value `it_session_id` gets 15 more days with each new session ([Login and session lifetime](#login-and-session-lifetime)).
 
 The fact against it: the scheduled run keeps only what the feed gives. A plan in the feed has its detail as free text, and the structured fields come from the backfill only.
 
@@ -101,7 +101,25 @@ The constraints:
 
 The login form at `https://www.tripit.com/account/login` takes an email and a password, or a Google or Apple account. Two-factor authentication is optional. "Keep me signed in" works with a TripIt password only.
 
-The backfill takes a pasted cookie. The operator logs in with a browser, copies the session cookie from the developer tools, and pastes it at the backfill prompt. The backfill does not save the cookie, and the image needs no browser. Each response from `www.tripit.com` sets the Akamai Bot Manager cookies `_abck` and `bm_sz`. On 2026-09-14, `curl` on the operator machine sent the pasted cookie with the `Accept` and `X-Requested-With` headers and no other headers. `/api/v2/get/profile` returned `200 application/json`. The download URL of "Export trip to calendar" returned `403 text/html` for the same cookie. The same download returned `200 text/calendar; charset=utf-8` when `curl` sent all the headers of the Firefox request ("Copy as cURL"). The block therefore depends on the request headers, and not on the TLS connection of `curl`. The cookie with the Firefox `User-Agent` alone still returned `403`. The machine had the same public address as the browser. A headless browser (Playwright) can log in by itself, but it makes the image much larger, and bot protection on the login page is not tested. If the API returns `401` after a retry, the session expired, and the backfill exits with `1`.
+The backfill takes a pasted cookie. The operator logs in with a browser, copies the session cookie from the developer tools, and pastes it at the backfill prompt. The backfill does not save the cookie, and the image needs no browser. Each response from `www.tripit.com` sets the Akamai Bot Manager cookies `_abck` and `bm_sz`. On 2026-09-14, `curl` on the operator machine sent the pasted cookie with the `Accept` and `X-Requested-With` headers and no other headers. `/api/v2/get/profile` returned `200 application/json`. The download URL of "Export trip to calendar" returned `403 text/html` for the same cookie. The same download returned `200 text/calendar; charset=utf-8` when `curl` sent all the headers of the Firefox request ("Copy as cURL"). The block therefore depends on the request headers, and not on the TLS connection of `curl`. The cookie with the Firefox `User-Agent` alone still returned `403`. The machine had the same public address as the browser. If the API returns `401` after a retry, the session expired, and the backfill exits with `1`.
+
+### Login and session lifetime
+
+No program can log in with the email and password. On 2026-09-17, a Go client with the standard library loaded the login page, and then sent the form with its `csrf_token` and the Firefox headers. Akamai returned `403` "Access Denied" to the POST. It returned the same `403` for a fake account, so the block comes before TripIt reads the credentials. An unmodified headless Chromium 153 (Playwright, both `chrome-headless-shell` and the full Chromium) got the same `403`. The `_abck` cookie stayed "not validated" (`~-1~`) in each test. A browser that passes Akamai must hide its automation.
+
+"Keep me signed in" sets `it_session_id` on `www.tripit.com`, with an expiry 15 days after the login. `session_id` ends when the browser closes. The other cookies are Akamai, consent, analytics and CSRF cookies. On 2026-09-17, the operator sent `it_session_id` alone to `/api/v2/get/profile`, with the API headers:
+
+| Request | Status | Cookies that TripIt set |
+|---|---|---|
+| `it_session_id` only | `200 application/json` | a new `session_id`; a new `it_session_id` value, which expires 15 days after this request; `it_rec_br` and `it_rmd`, 365 days |
+| The full browser `Cookie` header | `200 application/json` | no new `it_session_id` |
+| The same `it_session_id` value again, 2.5 minutes later, after TripIt replaced it | `200 application/json` | one more new `it_session_id` value |
+
+Thus `it_session_id` alone makes a session, and each new session gives a new value with 15 more days. An old value stays valid after TripIt replaces it, at least for some minutes. A fake `it_session_id` value gets `500`.
+
+A sign-out does not stop `it_session_id`. On 2026-09-17, the operator logged in with "Keep me signed in" in a private Firefox window, copied the `Cookie` header, and signed out. 5 to 10 minutes later, `it_session_id` alone got `200` and a new value. The full header also got a new `session_id` and a new `it_session_id`, so the sign-out stopped `session_id` only.
+
+The v2 detail response holds `timestamp`, which changes with each request. In the operator archive, 59 of the 70 trips that hold plan objects have an object with a `last_modified` that is newer than the `last_modified` of the trip, by a median of 530 days. Thus the `last_modified` of a trip does not show a change to its plans, and only the detail of a trip shows a change.
 
 ### Export trip to calendar
 
@@ -157,6 +175,7 @@ Answer these with the real account:
 
 1. Which of the browser headers does the download URL need? Does TripIt accept the cookie from an address that is not the browser address?
 2. Does TripIt read the file name at the end of the download URL, or can the backfill send any name?
+3. Does TripIt reject an `it_session_id` value after its 15 days, when no new session used it? Which status does TripIt return for a rejected value? [Issue 19](https://github.com/aaronspruit/tripit-exporter/issues/19) holds the test.
 
 The client sends the headers of a Firefox 155 request on the TripIt website
 with every request: the website's own API call for a web API v2 route
