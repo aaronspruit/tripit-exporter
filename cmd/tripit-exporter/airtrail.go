@@ -75,10 +75,7 @@ func runAirtrail(env map[string]string, outputDir string, cfg airtrailConfig, st
 	}
 
 	_, _ = fmt.Fprintf(stdout, "tripit-exporter: airtrail: %d flights in the archive\n", len(wanted))
-	result, syncWarnings, err := airtrail.Sync(context.Background(), client, outputDir, wanted, airtrail.Options{
-		UserID: cfg.userID,
-		Delete: cfg.delete,
-	})
+	result, syncWarnings, err := airtrail.Sync(context.Background(), client, outputDir, wanted, airtrail.Options{Delete: cfg.delete})
 	for _, w := range syncWarnings {
 		_, _ = fmt.Fprintln(stderr, "tripit-exporter: warning: airtrail:", w)
 	}

@@ -9,17 +9,9 @@ import (
 
 // Options are the settings of one sync run.
 type Options struct {
-	// UserID is the AirTrail user that owns each flight. An empty value
-	// means PlaceholderUserID, which AirTrail replaces with the holder of
-	// the API key.
-	UserID string
 	// Delete turns the delete step on. With it off, the sync adds and
 	// updates, and it leaves a flight that TripIt no longer holds.
 	Delete bool
-	// Codes are the IATA to ICAO tables. An empty value means DefaultCodes.
-	Codes Codes
-	// Logf writes one progress line. A nil value writes nothing.
-	Logf func(format string, args ...any)
 }
 
 // Result counts what one sync run changed.
@@ -47,9 +39,6 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 	var result Result
 	var warnings []string
 
-	if opts.Codes.Airline == nil && opts.Codes.Aircraft == nil {
-		opts.Codes = DefaultCodes()
-	}
 	state, err := LoadState(dir)
 	if err != nil {
 		return result, warnings, err
@@ -72,8 +61,11 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 		if errors.As(err, &authErr) {
 			return result, warnings, err
 		}
-		if err != nil && seen {
-			// The stored flight is gone, so add it again with no id.
+		var missing *NotFoundError
+		if errors.As(err, &missing) {
+			// A person removed the flight in AirTrail, so add it again with
+			// no id. Every other failure keeps the id: a retry with no id
+			// would add a second copy of a flight that is still there.
 			flight.ID = 0
 			id, err = client.Save(ctx, flight)
 			if errors.As(err, &authErr) {

@@ -291,3 +291,39 @@ func TestLoadStateOfABrokenFile(t *testing.T) {
 		t.Errorf("got no error, want one for a broken state file")
 	}
 }
+
+// TestSyncDoesNotDuplicateOnAFailedUpdate proves that a failure other than a
+// missing flight keeps the stored id. A retry with no id would add a second
+// copy of a flight that AirTrail still holds.
+func TestSyncDoesNotDuplicateOnAFailedUpdate(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	wanted := map[string]Flight{"seg-1": flight("SEA", "PDX", "2026-01-02T08:00:00-08:00")}
+	if _, _, err := Sync(context.Background(), client, dir, wanted, Options{}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	// TripIt moved the flight, and AirTrail answers the update with a 500.
+	server.FailFlight("SEA", http.StatusInternalServerError)
+	wanted["seg-1"] = flight("SEA", "PDX", "2026-01-02T11:30:00-08:00")
+	result, warnings, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("the run stopped: %v", err)
+	}
+	if result.Failed != 1 || result.Added != 0 || result.Updated != 0 {
+		t.Errorf("%+v, want one failed and nothing written", result)
+	}
+	if len(warnings) != 1 {
+		t.Errorf("got warnings %v, want one", warnings)
+	}
+	if saves, _ := server.Counts(); saves != 2 {
+		t.Errorf("the run sent %d saves, want 2: the add and the one failed update", saves)
+	}
+	if flights := server.Flights(); len(flights) != 1 {
+		t.Errorf("got %d flights, want 1", len(flights))
+	}
+	// The state keeps the old id and the old hash, so the next run tries the
+	// same update again.
+	if got := readState(t, dir).Flights["seg-1"]; got.ID != 1 || got.Hash != flight("SEA", "PDX", "2026-01-02T08:00:00-08:00").Hash() {
+		t.Errorf("state holds %+v, want the entry of the first run", got)
+	}
+}

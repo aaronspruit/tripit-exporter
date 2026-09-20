@@ -55,6 +55,8 @@ func (e *NotFoundError) Error() string {
 
 // Save writes one flight. A flight with an id replaces the flight of that
 // id, and a flight with no id is added. It returns the AirTrail flight id.
+// A flight whose id AirTrail no longer holds returns a *NotFoundError, which
+// the sync tells apart from a request that failed for another reason.
 func (c *Client) Save(ctx context.Context, flight Flight) (int64, error) {
 	var out struct {
 		Success bool   `json:"success"`
@@ -62,6 +64,9 @@ func (c *Client) Save(ctx context.Context, flight Flight) (int64, error) {
 		Message string `json:"message"`
 	}
 	if err := c.post(ctx, "/api/flight/save", flight, &out); err != nil {
+		if flight.ID != 0 && isMissing(err) {
+			return 0, &NotFoundError{ID: flight.ID}
+		}
 		return 0, err
 	}
 	if !out.Success {
@@ -82,8 +87,7 @@ func (c *Client) Delete(ctx context.Context, id int64) error {
 		Message string `json:"message"`
 	}
 	err := c.post(ctx, "/api/flight/delete", map[string]int64{"id": id}, &out)
-	var flightErr *FlightError
-	if errors.As(err, &flightErr) && strings.Contains(strings.ToLower(flightErr.Message), "not found") {
+	if isMissing(err) {
 		return &NotFoundError{ID: id}
 	}
 	if err != nil {
@@ -93,6 +97,18 @@ func (c *Client) Delete(ctx context.Context, id int64) error {
 		return &FlightError{Status: http.StatusOK, Message: out.Message}
 	}
 	return nil
+}
+
+// isMissing reports whether err says that AirTrail holds no flight of the
+// id that the request named. AirTrail answers that with the message "Flight
+// not found", and it gives no separate error code, so the message is the
+// only signal.
+func isMissing(err error) bool {
+	var flightErr *FlightError
+	if !errors.As(err, &flightErr) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(flightErr.Message), "not found")
 }
 
 // post sends body to path and reads the answer into out.
