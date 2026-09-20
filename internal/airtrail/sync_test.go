@@ -23,6 +23,9 @@ func syncFixture(t *testing.T) (*airtrailtest.Server, *Client, string) {
 	return server, client, t.TempDir()
 }
 
+// placeholder is the user id that AirTrail replaces with the key holder.
+var placeholder = PlaceholderUserID
+
 // flight makes one wanted flight of a segment.
 func flight(from, to, departure string) Flight {
 	clock := departure[11:16]
@@ -32,7 +35,7 @@ func flight(from, to, departure string) Flight {
 		DatePrecision: "day",
 		Departure:     departure,
 		DepartureTime: &clock,
-		Passengers:    []Passenger{{UserID: PlaceholderUserID}},
+		Passengers:    []Passenger{{UserID: &placeholder}},
 	}
 }
 

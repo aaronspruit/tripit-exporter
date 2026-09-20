@@ -233,6 +233,29 @@ purpose: AirTrail accepts a wrong aircraft without a word, so a guess would be
 invisible. An airport needs no table, because the save endpoint resolves an
 airport by ICAO or by IATA.
 
+The traveler of this account is the first passenger, because AirTrail
+replaces the user id of the first passenger when it is `<USER_ID>`. Each
+other named traveler follows as a guest. `traveler.isHolder` tells the two
+apart, because TripIt gives no flag: the last name of the `is_client`
+profile must be a word of the traveler last name, and the given name must
+be a title or share a start with the given name of the account. One real
+archive writes the same person as `Aaron Spruit`, `AARON CHRISTOPHER
+SPRUIT`, `Aaronc Spruit`, `MR Spruit` and `C Spruit Cntrl-`. The rule leans
+toward a match, because a missed match puts the owner of the archive on
+their own flight twice. `Profile`, `Traveler`, `AirObject` and `Segment` are
+each one object or an array.
+
+Only the first passenger takes `seatNumber`: TripIt holds every seat of a
+booking in one field, in no stated order. The `seat` enum
+(window, aisle, middle) and `flightReason` stay empty, because TripIt holds
+neither and a seat letter does not give the position without a seat map of
+the aircraft.
+
+`note` holds the confirmation numbers and, for a codeshare, the operating
+airline code and flight number. It never holds the TripIt
+`operating_airline` name, which names the code `CO` "North-Western Cargo
+International".
+
 `airlines.json` and `aircraft.json` of the AirTrail repository are written by
 hand, and no upstream feeds them, so an instance can hold a different set of
 codes from this table. The endpoint answers a code that its own table does

@@ -240,6 +240,14 @@ The exporter never guesses, because AirTrail accepts a wrong airline or a
 wrong aircraft without a word. An airport needs no table: the AirTrail API
 accepts an IATA airport code.
 
+Each flight carries the seat number and the cabin of the traveler, the
+confirmation numbers of the reservation, and the flight number of the airline
+that really flies the leg. A reservation that names a companion adds that
+person as a guest passenger. TripIt gives no window or aisle position, and no
+reason for the trip, so those two AirTrail fields stay empty. Only the
+traveler of this account takes the seat number: TripIt holds every seat of a
+booking in one field, in no stated order.
+
 AirTrail refuses a whole flight that carries a code its own tables do not
 hold. The sync therefore sends that flight again without the field that
 AirTrail named, and writes a warning. A flight with no aircraft is worth more

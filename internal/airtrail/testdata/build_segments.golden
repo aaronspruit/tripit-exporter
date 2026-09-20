@@ -14,10 +14,18 @@
     "departureGate": "16",
     "arrivalTerminal": "1",
     "arrivalGate": "61",
+    "note": "Confirmation: IHFST5\nCarlson Wagonlit Travel: DGGEVS",
     "passengers": [
       {
         "userId": "\u003cUSER_ID\u003e",
+        "guestName": null,
         "seatNumber": "23G",
+        "seatClass": "economy"
+      },
+      {
+        "userId": null,
+        "guestName": "Kim Companion",
+        "seatNumber": null,
         "seatClass": "economy"
       }
     ]
@@ -37,10 +45,18 @@
     "departureGate": null,
     "arrivalTerminal": null,
     "arrivalGate": null,
+    "note": "Confirmation: IHFST5\nCarlson Wagonlit Travel: DGGEVS\nOperated as NZ4610",
     "passengers": [
       {
         "userId": "\u003cUSER_ID\u003e",
+        "guestName": null,
         "seatNumber": "29H",
+        "seatClass": "business"
+      },
+      {
+        "userId": null,
+        "guestName": "Kim Companion",
+        "seatNumber": null,
         "seatClass": "business"
       }
     ]

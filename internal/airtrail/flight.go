@@ -39,12 +39,17 @@ type Flight struct {
 	DepartureGate     *string     `json:"departureGate"`
 	ArrivalTerminal   *string     `json:"arrivalTerminal"`
 	ArrivalGate       *string     `json:"arrivalGate"`
+	Note              *string     `json:"note"`
 	Passengers        []Passenger `json:"passengers"`
 }
 
-// Passenger is one entry of the passengers list of a flight.
+// Passenger is one entry of the passengers list of a flight. Exactly one of
+// UserID and GuestName holds a value: AirTrail refuses a passenger that
+// holds neither. The traveler of this account comes first, because AirTrail
+// replaces the user id of the first passenger when it is the placeholder.
 type Passenger struct {
-	UserID     string  `json:"userId"`
+	UserID     *string `json:"userId"`
+	GuestName  *string `json:"guestName"`
 	SeatNumber *string `json:"seatNumber"`
 	SeatClass  *string `json:"seatClass"`
 }
@@ -79,6 +84,7 @@ func Build(trips map[string]*archive.Trip, userID string, codes Codes) (map[stri
 		}
 		var detail struct {
 			AirObject airObjects `json:"AirObject"`
+			Profile   profiles   `json:"Profile"`
 		}
 		if err := json.Unmarshal(trip.V2, &detail); err != nil {
 			warnings = append(warnings, fmt.Sprintf("trip %s: read the v2 object: %v", trip.UUID, err))
@@ -94,7 +100,7 @@ func Build(trips map[string]*archive.Trip, userID string, codes Codes) (map[stri
 				if seg.IsHidden == "true" || seg.UUID == "" {
 					continue
 				}
-				flight, warning := buildFlight(seg, userID, codes)
+				flight, warning := buildFlight(air, seg, userID, detail.Profile.holder(), codes)
 				if warning != "" {
 					warnings = append(warnings, fmt.Sprintf("trip %s: %s", trip.UUID, warning))
 				}
@@ -112,7 +118,7 @@ func Build(trips map[string]*archive.Trip, userID string, codes Codes) (map[stri
 // buildFlight makes one flight from one TripIt segment. It returns a nil
 // flight for a segment that holds too little to save, and a warning for
 // anything it drops.
-func buildFlight(seg segment, userID string, codes Codes) (*Flight, string) {
+func buildFlight(air airObject, seg segment, userID string, holder profile, codes Codes) (*Flight, string) {
 	from := strings.ToUpper(strings.TrimSpace(seg.StartAirportCode))
 	to := strings.ToUpper(strings.TrimSpace(seg.EndAirportCode))
 	if from == "" || to == "" {
@@ -134,11 +140,8 @@ func buildFlight(seg segment, userID string, codes Codes) (*Flight, string) {
 		DepartureGate:     short(seg.StartGate, 10),
 		ArrivalTerminal:   short(seg.EndTerminal, 10),
 		ArrivalGate:       short(seg.EndGate, 10),
-		Passengers: []Passenger{{
-			UserID:     userID,
-			SeatNumber: short(firstSeat(seg.Seats), 5),
-			SeatClass:  optional(seatClass(seg.ServiceClass)),
-		}},
+		Note:              optional(note(air, seg)),
+		Passengers:        passengers(air, seg, userID, holder),
 	}
 
 	var warning string
@@ -169,6 +172,62 @@ func buildFlight(seg segment, userID string, codes Codes) (*Flight, string) {
 	}
 
 	return &flight, warning
+}
+
+// passengers returns the traveler of this account first, then each
+// companion that the reservation names as a guest. Only the first passenger
+// gets the seat: TripIt holds every seat of the booking in one field, in no
+// stated order, so a seat given to a companion could be the wrong one.
+func passengers(air airObject, seg segment, userID string, holder profile) []Passenger {
+	out := []Passenger{{
+		UserID:     &userID,
+		SeatNumber: short(firstSeat(seg.Seats), 5),
+		SeatClass:  optional(seatClass(seg.ServiceClass)),
+	}}
+	class := optional(seatClass(seg.ServiceClass))
+	for _, t := range air.Traveler {
+		name := t.name()
+		if name == "" || t.isHolder(holder) {
+			continue
+		}
+		guest := short(name, 50)
+		if guest == nil {
+			continue
+		}
+		out = append(out, Passenger{GuestName: guest, SeatClass: class})
+	}
+	return out
+}
+
+// note returns the free text that AirTrail shows with the flight: the
+// confirmation numbers of the reservation, and the flight number of the
+// airline that really flies the leg.
+//
+// It never holds the TripIt operating_airline name, which is wrong for some
+// reservations: TripIt names the code CO "North-Western Cargo
+// International", and CO belonged to Continental Airlines.
+func note(air airObject, seg segment) string {
+	var lines []string
+	if conf := strings.TrimSpace(air.SupplierConfNum); conf != "" {
+		lines = append(lines, "Confirmation: "+conf)
+	}
+	if conf := strings.TrimSpace(air.BookingSiteConfNum); conf != "" && conf != strings.TrimSpace(air.SupplierConfNum) {
+		site := strings.TrimSpace(air.BookingSiteName)
+		if site == "" {
+			site = "Booking site"
+		}
+		lines = append(lines, site+": "+conf)
+	}
+	code := strings.ToUpper(strings.TrimSpace(seg.OperatingAirlineCode))
+	number := strings.TrimSpace(seg.OperatingFlightNumber)
+	if code != "" && number != "" && code+number != flightNumber(seg) {
+		lines = append(lines, "Operated as "+code+number)
+	}
+	text := strings.Join(lines, "\n")
+	if len(text) > 1000 {
+		return ""
+	}
+	return text
 }
 
 // airlineICAO returns the ICAO code of the marketing airline of seg. TripIt

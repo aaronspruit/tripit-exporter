@@ -2,6 +2,7 @@ package airtrail
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/aaronspruit/tripit-exporter/internal/archive"
@@ -15,8 +16,18 @@ func tripWithV2(uuid, detail string) *archive.Trip {
 
 // twoSegments is a trip with a connection: one reservation, two legs.
 const twoSegments = `{
+  "Profile": [{"is_client": "false", "first_name": "Kim", "last_name": "Companion"},
+              {"is_client": "true", "first_name": "Dana", "last_name": "Traveler"}],
   "AirObject": [{
     "is_client_traveler": "true",
+    "supplier_conf_num": "IHFST5",
+    "booking_site_name": "Carlson Wagonlit Travel",
+    "booking_site_conf_num": "DGGEVS",
+    "Traveler": [
+      {"first_name": "Dana", "last_name": "Traveler", "ticket_num": "0167426262107"},
+      {"first_name": "Kim", "last_name": "Companion"},
+      {"ticket_num": "20"}
+    ],
     "Segment": [
       {
         "uuid": "seg-1",
@@ -37,6 +48,7 @@ const twoSegments = `{
         "EndDateTime": {"date": "2014-08-16", "time": "11:25:00", "utc_offset": "-07:00"},
         "marketing_airline": "United Airlines", "marketing_airline_code": "UA",
         "marketing_flight_number": "870",
+        "operating_airline_code": "NZ", "operating_flight_number": "4610",
         "aircraft": "73H", "aircraft_display_name": "Boeing 737-800 (winglets) Passenger/BBJ2",
         "seats": "29H, 29J", "service_class": "Business Class"
       }
@@ -88,7 +100,7 @@ func TestBuildFieldsOfOneSegment(t *testing.T) {
 		{"airline", deref(first.Airline), "UAL"},
 		{"departureGate", deref(first.DepartureGate), "16"},
 		{"arrivalTerminal", deref(first.ArrivalTerminal), "1"},
-		{"userId", first.Passengers[0].UserID, "aaron"},
+		{"userId", deref(first.Passengers[0].UserID), "aaron"},
 		{"seatNumber", deref(first.Passengers[0].SeatNumber), "23G"},
 		{"seatClass", deref(first.Passengers[0].SeatClass), "economy"},
 	}
@@ -115,7 +127,7 @@ func TestBuildDefaultsToThePlaceholderUser(t *testing.T) {
 	trips := map[string]*archive.Trip{"trip-1": tripWithV2("trip-1", twoSegments)}
 	flights, _ := Build(trips, "", DefaultCodes())
 
-	if got := flights["seg-1"].Passengers[0].UserID; got != PlaceholderUserID {
+	if got := deref(flights["seg-1"].Passengers[0].UserID); got != PlaceholderUserID {
 		t.Errorf("userId = %q, want %q", got, PlaceholderUserID)
 	}
 }
@@ -259,4 +271,151 @@ func deref(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+// TestBuildAddsCompanionsAsGuests proves that the account holder appears
+// once, as the user, and never a second time as a guest.
+func TestBuildAddsCompanionsAsGuests(t *testing.T) {
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", twoSegments)}, "aaron", DefaultCodes())
+
+	got := flights["seg-1"].Passengers
+	if len(got) != 2 {
+		t.Fatalf("got %d passengers, want 2", len(got))
+	}
+	if deref(got[0].UserID) != "aaron" || got[0].GuestName != nil {
+		t.Errorf("first passenger = %+v, want the account user", got[0])
+	}
+	if got[1].UserID != nil || deref(got[1].GuestName) != "Kim Companion" {
+		t.Errorf("second passenger = %+v, want the guest Kim Companion", got[1])
+	}
+	// Only the first passenger takes the seat: TripIt holds every seat of a
+	// booking in one field, in no stated order.
+	if got[1].SeatNumber != nil {
+		t.Errorf("the guest got seat %q, want none", deref(got[1].SeatNumber))
+	}
+}
+
+// TestBuildWithNoClientProfile covers a trip whose v2 object names no
+// profile with is_client: with no name to match, every named traveler
+// becomes a guest.
+func TestBuildWithNoClientProfile(t *testing.T) {
+	const noProfile = `{"AirObject": {"is_client_traveler": "true",
+      "Traveler": [{"first_name": "Dana", "last_name": "Traveler"}],
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", noProfile)}, "", DefaultCodes())
+
+	if got := flights["seg-1"].Passengers; len(got) != 2 {
+		t.Errorf("got %d passengers, want the user and one guest", len(got))
+	}
+}
+
+func TestBuildNote(t *testing.T) {
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", twoSegments)}, "", DefaultCodes())
+
+	if got := deref(flights["seg-1"].Note); got != "Confirmation: IHFST5\nCarlson Wagonlit Travel: DGGEVS" {
+		t.Errorf("note of seg-1 = %q", got)
+	}
+	// The codeshare line appears on the leg that another airline flies.
+	if got := deref(flights["seg-2"].Note); !strings.HasSuffix(got, "\nOperated as NZ4610") {
+		t.Errorf("note of seg-2 = %q, want it to end with the operating flight", got)
+	}
+}
+
+// TestBuildNoteLeavesOutARepeatedConfirmation covers a reservation whose
+// booking site holds the same number as the airline.
+func TestBuildNoteLeavesOutARepeatedConfirmation(t *testing.T) {
+	const same = `{"AirObject": {"is_client_traveler": "true",
+      "supplier_conf_num": "ABC123", "booking_site_conf_num": "ABC123",
+      "booking_site_name": "Some Site",
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "marketing_airline_code": "AS", "marketing_flight_number": "2040",
+        "operating_airline_code": "AS", "operating_flight_number": "2040",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", same)}, "", DefaultCodes())
+
+	// The airline flies its own flight, so no line says who operates it.
+	if got := deref(flights["seg-1"].Note); got != "Confirmation: ABC123" {
+		t.Errorf("note = %q, want the confirmation alone", got)
+	}
+}
+
+func TestBuildNoteIsEmptyWithoutSource(t *testing.T) {
+	const bare = `{"AirObject": {"is_client_traveler": "true",
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", bare)}, "", DefaultCodes())
+
+	if flights["seg-1"].Note != nil {
+		t.Errorf("note = %q, want null", deref(flights["seg-1"].Note))
+	}
+}
+
+// TestIsHolderAcceptsEachNameFormAnAirlineWrites covers the forms that one
+// real archive holds for the same person. A companion wrongly counted as a
+// guest would put the owner of the archive on their own flight twice.
+func TestIsHolderAcceptsEachNameFormAnAirlineWrites(t *testing.T) {
+	holder := profile{FirstName: "Aaron", LastName: "Spruit"}
+	cases := []struct {
+		first, last string
+		want        bool
+	}{
+		{"Aaron", "Spruit", true},
+		{"AARON CHRISTOPHER", "SPRUIT", true},
+		{"Aaronc", "Spruit", true},
+		{"MR", "Spruit", true},
+		{"", "Spruit", true},
+		{"Aaron", "C Spruit Cntrl-", true},
+		// A companion who shares the last name stays a guest.
+		{"Asher", "Spruit", false},
+		{"Huei-Yow", "Spruit", false},
+		{"Nolan", "Spruit", false},
+		// So does anyone with another last name.
+		{"Aaron", "Other", false},
+		// One initial matches no one.
+		{"A", "Spruit", false},
+	}
+	for _, c := range cases {
+		got := traveler{FirstName: c.first, LastName: c.last}.isHolder(holder)
+		if got != c.want {
+			t.Errorf("isHolder(%q %q) = %v, want %v", c.first, c.last, got, c.want)
+		}
+	}
+}
+
+// TestIsHolderWithNoClientProfile proves that an unknown account holder
+// makes no traveler a match, rather than matching everyone.
+func TestIsHolderWithNoClientProfile(t *testing.T) {
+	unknown := traveler{FirstName: "Aaron", LastName: "Spruit"}
+	if unknown.isHolder(profile{}) {
+		t.Errorf("a traveler matched an empty profile")
+	}
+}
+
+// TestBuildReadsProfileAsOneObjectOrAnArray covers a trip that another
+// traveler shares, which names a profile for each account.
+func TestBuildReadsProfileAsOneObjectOrAnArray(t *testing.T) {
+	const single = `{"Profile": {"is_client": "true", "first_name": "Dana", "last_name": "Traveler"},
+      "AirObject": {"is_client_traveler": "true",
+      "Traveler": [{"first_name": "Dana", "last_name": "Traveler"},
+                   {"first_name": "Kim", "last_name": "Companion"}],
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", single)}, "", DefaultCodes())
+
+	got := flights["seg-1"].Passengers
+	if len(got) != 2 {
+		t.Fatalf("got %d passengers, want the user and one guest", len(got))
+	}
+	if deref(got[1].GuestName) != "Kim Companion" {
+		t.Errorf("guest = %q, want Kim Companion", deref(got[1].GuestName))
+	}
 }
