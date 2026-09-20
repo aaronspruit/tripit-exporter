@@ -1,0 +1,64 @@
+{
+  "seg-1": {
+    "from": "MEL",
+    "to": "SYD",
+    "datePrecision": "day",
+    "departure": "2014-08-16T11:20:00+10:00",
+    "departureTime": "11:20",
+    "arrival": "2014-08-16T12:45:00+10:00",
+    "arrivalTime": "12:45",
+    "flightNumber": "UA840",
+    "airline": "UAL",
+    "aircraft": null,
+    "departureTerminal": "2",
+    "departureGate": "16",
+    "arrivalTerminal": "1",
+    "arrivalGate": "61",
+    "note": "Confirmation: IHFST5\nCarlson Wagonlit Travel: DGGEVS",
+    "passengers": [
+      {
+        "userId": "\u003cUSER_ID\u003e",
+        "guestName": null,
+        "seatNumber": "23G",
+        "seatClass": "economy"
+      },
+      {
+        "userId": null,
+        "guestName": "Kim Companion",
+        "seatNumber": null,
+        "seatClass": "economy"
+      }
+    ]
+  },
+  "seg-2": {
+    "from": "SYD",
+    "to": "SFO",
+    "datePrecision": "day",
+    "departure": "2014-08-16T14:45:00+10:00",
+    "departureTime": "14:45",
+    "arrival": "2014-08-16T11:25:00-07:00",
+    "arrivalTime": "11:25",
+    "flightNumber": "UA870",
+    "airline": "UAL",
+    "aircraft": "B738",
+    "departureTerminal": null,
+    "departureGate": null,
+    "arrivalTerminal": null,
+    "arrivalGate": null,
+    "note": "Confirmation: IHFST5\nCarlson Wagonlit Travel: DGGEVS\nOperated as NZ4610",
+    "passengers": [
+      {
+        "userId": "\u003cUSER_ID\u003e",
+        "guestName": null,
+        "seatNumber": "29H",
+        "seatClass": "business"
+      },
+      {
+        "userId": null,
+        "guestName": "Kim Companion",
+        "seatNumber": null,
+        "seatClass": "business"
+      }
+    ]
+  }
+}

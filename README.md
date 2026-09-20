@@ -175,6 +175,11 @@ gives full access to your TripIt account, so do not share the data folder.
 | `TRIPIT_SESSION` | Feed run | When `TRIPIT_JSON_REFRESH` is `true` | none | `tripit_session` | The value of the TripIt cookie `it_session_id`. Treat it as a credential |
 | `TRIPIT_USER_AGENT` | Feed run, backfill | No | Firefox 155 on Windows | | The `User-Agent` of the browser you copy the cookie from. The exporter sends it with every TripIt JSON request |
 | `TRIPIT_VERBOSE` | Feed run, backfill | No | `false` | | When `true`, the exporter shows each TripIt JSON request and answer, with a timestamp. The cookie values stay hidden |
+| `TRIPIT_AIRTRAIL_SYNC` | Feed run | No | `false` | | When `true`, each run also makes the flights of an AirTrail instance match the archive. See [The AirTrail sync](#the-airtrail-sync) |
+| `TRIPIT_AIRTRAIL_URL` | Feed run | When `TRIPIT_AIRTRAIL_SYNC` is `true` | none | | The root URL of the AirTrail instance, for example `https://airtrail.example.com` |
+| `TRIPIT_AIRTRAIL_API_KEY` | Feed run | When `TRIPIT_AIRTRAIL_SYNC` is `true` | none | `airtrail_api_key` | An AirTrail API key. Treat it as a credential |
+| `TRIPIT_AIRTRAIL_USER_ID` | Feed run | No | the key holder | | The AirTrail user that owns each flight. Leave it empty to use the holder of the API key |
+| `TRIPIT_AIRTRAIL_DELETE` | Feed run | No | `true` | | With `false`, the sync adds and updates a flight but never deletes one |
 
 A Docker or Kubernetes secret file under `/run/secrets/<name>` takes priority
 over the matching environment variable. The `backfill` subcommand reads its
@@ -185,6 +190,7 @@ cookie from a prompt, and never from an environment variable.
 ```text
 data/
 ├── .tripit-session         the newest TripIt session value, when the JSON refresh is on
+├── airtrail-state.json     the AirTrail flight of each TripIt segment, when the AirTrail sync is on
 ├── tripit.ics              the events of every trip in the archive
 └── trips/
     ├── <trip uuid>.json    one trip: its events, and its structured fields once the JSON refresh has read it
@@ -202,6 +208,53 @@ event too.
 | `0` | Success, or a `429` rate limit. The next run continues |
 | `1` | The feed URL is wrong or revoked, or TripIt rejected the session value or the backfill cookie. Get a new one |
 | `2` | Any other error |
+| `3` | The AirTrail sync failed. A rejected API key has its own code, and not `1`, so that the two systems stay apart |
+
+## The AirTrail sync
+
+With `TRIPIT_AIRTRAIL_SYNC` set to `true`, each run makes the flights of an
+AirTrail instance match the air segments of the archive. The sync runs after
+the merge and the JSON refresh, and it reads the structured `v2` object of
+each trip, so a trip gives flights only once the refresh or the backfill has
+read it. Make the API key in AirTrail under Settings.
+
+`data/airtrail-state.json` holds the AirTrail flight id of each TripIt
+segment, with a hash of the body that made it:
+
+- A segment with no entry is added.
+- A segment whose hash matches sends no request at all. A run that changes
+  nothing in TripIt changes nothing in AirTrail, so a change that you make in
+  AirTrail stays until TripIt changes the same flight.
+- A segment whose hash differs replaces the flight of its stored id.
+- An entry with no segment is deleted. This covers a cancelled trip and a
+  cancelled leg of a trip that goes ahead.
+
+The sync deletes only a flight that it added, because the state file holds
+the only list of those ids. A flight that you add in AirTrail is never
+touched.
+
+AirTrail matches an airline and an aircraft type by ICAO code, and TripIt
+gives an IATA code, so the exporter holds a table for each. A code that no
+table holds makes a warning, and the flight keeps no airline or no aircraft.
+The exporter never guesses, because AirTrail accepts a wrong airline or a
+wrong aircraft without a word. An airport needs no table: the AirTrail API
+accepts an IATA airport code.
+
+Each flight carries the seat number and the cabin of the traveler, the
+confirmation numbers of the reservation, and the flight number of the airline
+that really flies the leg. A reservation that names a companion adds that
+person as a guest passenger. TripIt gives no window or aisle position, and no
+reason for the trip, so those two AirTrail fields stay empty. Only the
+traveler of this account takes the seat number: TripIt holds every seat of a
+booking in one field, in no stated order.
+
+AirTrail refuses a whole flight that carries a code its own tables do not
+hold. The sync therefore sends that flight again without the field that
+AirTrail named, and writes a warning. A flight with no aircraft is worth more
+than no flight at all.
+
+A flight that AirTrail refuses makes a warning and no state entry, so the
+next run tries it again. Only a rejected API key stops the run.
 
 ## The backfill subcommand
 
