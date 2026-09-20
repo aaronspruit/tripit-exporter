@@ -47,8 +47,9 @@ func outputDir(env map[string]string) string {
 }
 
 // runFeed fetches the TripIt calendar feed and merges it into the archive
-// under outputDir(env). When TRIPIT_JSON_REFRESH is true, a successful merge
-// is followed by the JSON refresh. See docs/plan.md for the exit code table.
+// under outputDir(env). A successful merge is followed by the JSON refresh
+// when TRIPIT_JSON_REFRESH is true, and then by the AirTrail sync when
+// TRIPIT_AIRTRAIL_SYNC is true. See the README for the exit code table.
 func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int {
 	feedURL := secret.Read("tripit_feed_url", "TRIPIT_FEED_URL", env)
 	if feedURL == "" {
@@ -57,6 +58,11 @@ func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int
 	}
 	outputDir := outputDir(env)
 	refresh, err := readRefreshConfig(env, outputDir)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
+		return 2
+	}
+	airtrailCfg, err := readAirtrailConfig(env)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
 		return 2
@@ -80,8 +86,13 @@ func runFeed(env map[string]string, stdout, stderr io.Writer, now time.Time) int
 	for _, w := range warnings {
 		_, _ = fmt.Fprintln(stderr, "tripit-exporter: warning:", w)
 	}
-	if !refresh.enabled {
+	if refresh.enabled {
+		if code := runRefresh(env, outputDir, refresh, stdout, stderr, now); code != 0 {
+			return code
+		}
+	}
+	if !airtrailCfg.enabled {
 		return 0
 	}
-	return runRefresh(env, outputDir, refresh, stdout, stderr, now)
+	return runAirtrail(env, outputDir, airtrailCfg, stdout, stderr)
 }

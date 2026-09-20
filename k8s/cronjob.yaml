@@ -8,6 +8,9 @@ stringData:
   # The value of the TripIt cookie it_session_id, for the JSON refresh. See
   # "Part 2: the full history" in the README.
   # TRIPIT_SESSION: ""
+  # An AirTrail API key, for the AirTrail sync. See "The AirTrail sync" in
+  # the README.
+  # TRIPIT_AIRTRAIL_API_KEY: ""
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -80,6 +83,17 @@ spec:
                 #     secretKeyRef:
                 #       name: tripit-credentials
                 #       key: TRIPIT_SESSION
+                # To turn on the AirTrail sync, remove the comment marks here
+                # and in the Secret.
+                # - name: TRIPIT_AIRTRAIL_SYNC
+                #   value: "true"
+                # - name: TRIPIT_AIRTRAIL_URL
+                #   value: "https://airtrail.example.com"
+                # - name: TRIPIT_AIRTRAIL_API_KEY
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: tripit-credentials
+                #       key: TRIPIT_AIRTRAIL_API_KEY
               volumeMounts:
                 - name: data-storage
                   mountPath: /data

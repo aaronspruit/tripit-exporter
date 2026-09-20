@@ -1,0 +1,48 @@
+{
+  "seg-1": {
+    "from": "MEL",
+    "to": "SYD",
+    "datePrecision": "day",
+    "departure": "2014-08-16T11:20:00+10:00",
+    "departureTime": "11:20",
+    "arrival": "2014-08-16T12:45:00+10:00",
+    "arrivalTime": "12:45",
+    "flightNumber": "UA840",
+    "airline": "UAL",
+    "aircraft": null,
+    "departureTerminal": "2",
+    "departureGate": "16",
+    "arrivalTerminal": "1",
+    "arrivalGate": "61",
+    "passengers": [
+      {
+        "userId": "\u003cUSER_ID\u003e",
+        "seatNumber": "23G",
+        "seatClass": "economy"
+      }
+    ]
+  },
+  "seg-2": {
+    "from": "SYD",
+    "to": "SFO",
+    "datePrecision": "day",
+    "departure": "2014-08-16T14:45:00+10:00",
+    "departureTime": "14:45",
+    "arrival": "2014-08-16T11:25:00-07:00",
+    "arrivalTime": "11:25",
+    "flightNumber": "UA870",
+    "airline": "UAL",
+    "aircraft": "B738",
+    "departureTerminal": null,
+    "departureGate": null,
+    "arrivalTerminal": null,
+    "arrivalGate": null,
+    "passengers": [
+      {
+        "userId": "\u003cUSER_ID\u003e",
+        "seatNumber": "29H",
+        "seatClass": "business"
+      }
+    ]
+  }
+}

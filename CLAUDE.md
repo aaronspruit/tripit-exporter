@@ -101,12 +101,15 @@ the one-time backfill.
 | `internal/feed` | Fetches the calendar feed, and maps each HTTP result to an error type |
 | `internal/archive` | Loads, merges and writes the trip files, and makes the two ICS files |
 | `internal/tripitweb` | Calls the TripIt web API v2 and the trip download URL with a session cookie |
+| `internal/airtrail` | Turns the `v2` air segments into AirTrail flights, and keeps an AirTrail instance in step with the archive |
 
 The exit code order: a feed fetch error takes the code from
 [the table](README.md#exit-codes) before the archive runs at all. An archive
 error, for example a disk failure, exits with `2`. A setting error of the
-refresh exits with `2` before the feed fetch. The refresh runs only after a
-successful merge, and its error takes the backfill codes.
+refresh or of the AirTrail sync exits with `2` before the feed fetch. The
+refresh runs only after a successful merge, and its error takes the backfill
+codes. The AirTrail sync runs after the refresh, and every failure of it
+exits with `3`.
 
 ## The archive
 
@@ -202,6 +205,34 @@ request, so an unchanged trip writes no file.
 `TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`
 calls. It is empty in production; a test sets it to a fake server's URL.
 
+## The AirTrail sync
+
+`internal/airtrail.Build` makes one request body for each `Segment` of each
+`AirObject` of each trip, keyed by the TripIt segment UUID. It skips a hidden
+segment and a trip that another traveler shares. `Sync` then adds, replaces
+or deletes a flight so that AirTrail matches that set.
+
+`<OUTPUT_DIR>/airtrail-state.json` holds the AirTrail flight id and a hash of
+the body for each segment. The state cannot live in a trip file:
+`shouldDeleteAbsentTrip` removes the file of a trip that left the feed, which
+is the moment the sync needs the id to delete the flight. An equal hash sends
+no request, so a change made in AirTrail stays until TripIt changes the same
+flight. The state is written after each change, because it holds the only
+record of a new flight.
+
+`POST /api/flight/save` reads the date from `departure` and the clock time
+from `departureTime`, and merges the two in the timezone of its own airport
+record. An arrival date with no arrival time is a `400`, and so is an arrival
+that is not after its departure, which one TripIt segment of the operator
+archive holds. That flight keeps its departure and loses its arrival.
+
+AirTrail matches an airline and an aircraft type by ICAO code alone, with no
+IATA or name fallback, so `codes.go` holds a table for each. A generic TripIt
+aircraft code such as `777` or `32S` names more than one type and is absent on
+purpose: AirTrail accepts a wrong aircraft without a word, so a guess would be
+invisible. An airport needs no table, because the save endpoint resolves an
+airport by ICAO or by IATA.
+
 ## Testing notes
 
 `internal/testutil.Golden(t, name, got)` compares `got` with
@@ -219,6 +250,11 @@ header, and for a UUID that `BlockDownload` names.
 No test fixture holds a real feed URL, a real cookie, a real name, or a real
 trip. Each fixture is synthetic, built to the shape of the operator feed
 described in [docs/research.md](docs/research.md).
+
+`internal/airtrailtest.New()` starts a fake AirTrail instance that holds the
+saved flights in memory; `RejectKey` and `FailFlight` make it answer `401`
+and `400`, and `Flights` and `Counts` let a test prove that an unchanged run
+sends nothing.
 
 A scenario test drives `archive.Run` with an injected clock, so no test
 reads the real time. `internal/ics` also carries a fuzz target for the

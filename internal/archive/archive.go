@@ -326,7 +326,7 @@ func Write(dir string, trips map[string]*Trip) error {
 			return fmt.Errorf("archive: encode trip %s: %w", trip.UUID, err)
 		}
 		data = append(data, '\n')
-		if err := writeIfChanged(tripsDir, trip.UUID+".json", data); err != nil {
+		if err := WriteFileIfChanged(tripsDir, trip.UUID+".json", data); err != nil {
 			return err
 		}
 
@@ -340,7 +340,7 @@ func Write(dir string, trips map[string]*Trip) error {
 		if err := ics.WriteCalendar(&buf, tripEvents); err != nil {
 			return fmt.Errorf("archive: encode calendar for trip %s: %w", trip.UUID, err)
 		}
-		if err := writeIfChanged(tripsDir, trip.UUID+".ics", []byte(buf.String())); err != nil {
+		if err := WriteFileIfChanged(tripsDir, trip.UUID+".ics", []byte(buf.String())); err != nil {
 			return err
 		}
 	}
@@ -353,7 +353,7 @@ func Write(dir string, trips map[string]*Trip) error {
 	if err := ics.WriteCalendar(&buf, all); err != nil {
 		return fmt.Errorf("archive: encode tripit.ics: %w", err)
 	}
-	return writeIfChanged(dir, "tripit.ics", []byte(buf.String()))
+	return WriteFileIfChanged(dir, "tripit.ics", []byte(buf.String()))
 }
 
 // orderedTrips returns trips in order of start date, then UUID, so the
@@ -409,9 +409,9 @@ func removeStale(tripsDir string, kept map[string]bool) error {
 	return nil
 }
 
-// writeIfChanged writes data to dir/name only when its SHA-256 differs from
+// WriteFileIfChanged writes data to dir/name only when its SHA-256 differs from
 // the file already on disk.
-func writeIfChanged(dir, name string, data []byte) error {
+func WriteFileIfChanged(dir, name string, data []byte) error {
 	path := filepath.Join(dir, name)
 	if existing, err := os.ReadFile(path); err == nil && sha256.Sum256(existing) == sha256.Sum256(data) {
 		return nil
