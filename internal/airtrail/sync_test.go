@@ -441,3 +441,73 @@ func TestRefusedField(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncNamesNoDroppedFieldWhenTheRetryFails covers a flight that AirTrail
+// refuses for its aircraft and then refuses again. Nothing was saved, so the
+// run must not say that the flight went without its aircraft.
+func TestSyncNamesNoDroppedFieldWhenTheRetryFails(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	// The first save is refused for its aircraft, and the retry with no
+	// aircraft fails as well.
+	server.Hold("aircraft", "B738")
+	server.Refuse("aircraft")
+	wanted := map[string]Flight{
+		"seg-1": withCodes(flight("SEA", "PDX", "2026-01-02T08:00:00-08:00"), "ASA", "B39M"),
+	}
+
+	result, warnings, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("the run stopped: %v", err)
+	}
+	if result.Failed != 1 || result.Added != 0 {
+		t.Errorf("%+v, want one failed and none added", result)
+	}
+	for _, w := range warnings {
+		if strings.Contains(w, "goes without it") {
+			t.Errorf("warning %q says the flight was saved, and it was not", w)
+		}
+	}
+	if len(server.Flights()) != 0 {
+		t.Errorf("AirTrail holds a flight, want none")
+	}
+	if _, kept := readState(t, dir).Flights["seg-1"]; kept {
+		t.Errorf("the failed flight got a state entry, want none")
+	}
+}
+
+// TestSyncNamesADroppedFieldOnceAfterAGoneFlight covers the two retries in
+// one run: the stored flight is gone, and the aircraft is refused. The run
+// saves the flight and names the aircraft one time, not two.
+func TestSyncNamesADroppedFieldOnceAfterAGoneFlight(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	wanted := map[string]Flight{
+		"seg-1": withCodes(flight("SEA", "PDX", "2026-01-02T08:00:00-08:00"), "ASA", "B39M"),
+	}
+	if _, _, err := Sync(context.Background(), client, dir, wanted, Options{}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	// A person removes the flight in AirTrail, and the instance loses the
+	// aircraft type as well.
+	if err := client.Delete(context.Background(), 1); err != nil {
+		t.Fatalf("remove the flight: %v", err)
+	}
+	server.Hold("aircraft", "B738")
+	wanted["seg-1"] = withCodes(flight("SEA", "PDX", "2026-01-02T11:30:00-08:00"), "ASA", "B39M")
+
+	result, warnings, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if result.Updated != 1 {
+		t.Errorf("%+v, want one updated", result)
+	}
+	var named int
+	for _, w := range warnings {
+		if strings.Contains(w, "aircraft B39M") {
+			named++
+		}
+	}
+	if named != 1 {
+		t.Errorf("the aircraft is named %d times, want 1: %v", named, warnings)
+	}
+}

@@ -22,6 +22,7 @@ type Server struct {
 	nextID   int64
 	failFrom map[string]int
 	known    map[string]map[string]bool
+	needs    map[string]bool
 	rejects  bool
 	saves    int
 	deletes  int
@@ -34,6 +35,7 @@ func New() *Server {
 		nextID:   1,
 		failFrom: make(map[string]int),
 		known:    make(map[string]map[string]bool),
+		needs:    make(map[string]bool),
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
@@ -67,6 +69,15 @@ func (s *Server) Hold(field string, codes ...string) {
 		held[code] = true
 	}
 	s.known[field] = held
+}
+
+// Refuse makes the server answer 500 for a save whose field holds no value.
+// It stands for a second failure that meets a flight after the sync already
+// dropped a field from it.
+func (s *Server) Refuse(field string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.needs[field] = true
 }
 
 // Flights returns the saved flights, in id order.
@@ -138,6 +149,16 @@ func (s *Server) save(w http.ResponseWriter, body map[string]any) {
 			"message": "Invalid " + field,
 		})
 		return
+	}
+
+	for field := range s.needs {
+		if code, sent := body[field].(string); !sent || code == "" {
+			write(w, http.StatusInternalServerError, map[string]any{
+				"success": false,
+				"message": "Something went wrong",
+			})
+			return
+		}
 	}
 
 	id := int64(0)

@@ -66,21 +66,25 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 			// A person removed the flight in AirTrail, so add it again with
 			// no id. Every other failure keeps the id: a retry with no id
 			// would add a second copy of a flight that is still there.
+			// save works on its own copy, so this attempt starts from the
+			// whole flight and drops the same fields again. Its list
+			// replaces the first, and no field is named twice.
 			flight.ID = 0
-			var second []string
-			id, second, err = save(ctx, client, flight)
-			dropped = append(dropped, second...)
+			id, dropped, err = save(ctx, client, flight)
 			if errors.As(err, &authErr) {
 				return result, warnings, err
 			}
-		}
-		for _, field := range dropped {
-			warnings = append(warnings, fmt.Sprintf("segment %s: AirTrail holds no such %s, the flight goes without it", uuid, field))
 		}
 		if err != nil {
 			result.Failed++
 			warnings = append(warnings, fmt.Sprintf("segment %s: %v", uuid, err))
 			continue
+		}
+		// A dropped field is named only once the flight is saved. A retry
+		// that fails as well saved nothing, so the flight went nowhere
+		// without that field.
+		for _, field := range dropped {
+			warnings = append(warnings, fmt.Sprintf("segment %s: AirTrail holds no such %s, the flight goes without it", uuid, field))
 		}
 
 		state.Flights[uuid] = FlightState{ID: id, Hash: hash}

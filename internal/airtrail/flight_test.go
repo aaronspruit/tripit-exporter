@@ -419,3 +419,50 @@ func TestBuildReadsProfileAsOneObjectOrAnArray(t *testing.T) {
 		t.Errorf("guest = %q, want Kim Companion", deref(got[1].GuestName))
 	}
 }
+
+// TestBuildDropsANoteThatIsTooLong covers the AirTrail limit of 1000
+// characters on a note. The flight keeps every other field.
+func TestBuildDropsANoteThatIsTooLong(t *testing.T) {
+	long := strings.Repeat("A", 1200)
+	detail := `{"AirObject": {"is_client_traveler": "true",
+      "supplier_conf_num": "` + long + `",
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", detail)}, "", DefaultCodes())
+
+	flight, ok := flights["seg-1"]
+	if !ok {
+		t.Fatalf("got no flight, want the flight with no note")
+	}
+	if flight.Note != nil {
+		t.Errorf("note is %d characters, want null", len(deref(flight.Note)))
+	}
+	if flight.From != "SEA" {
+		t.Errorf("from = %q, want the flight kept", flight.From)
+	}
+}
+
+// TestBuildDropsAGuestNameThatIsTooLong covers the AirTrail limit of 50
+// characters on a guest name. The flight keeps the traveler of this account.
+func TestBuildDropsAGuestNameThatIsTooLong(t *testing.T) {
+	long := strings.Repeat("Bartholomew ", 6)
+	detail := `{"Profile": {"is_client": "true", "first_name": "Dana", "last_name": "Traveler"},
+      "AirObject": {"is_client_traveler": "true",
+      "Traveler": [{"first_name": "` + long + `", "last_name": "Companion"},
+                   {"first_name": "Kim", "last_name": "Companion"}],
+      "Segment": {"uuid": "seg-1",
+        "start_airport_code": "SEA", "end_airport_code": "PDX",
+        "StartDateTime": {"date": "2026-01-02", "time": "08:00:00", "utc_offset": "-08:00"}}}}`
+
+	flights, _ := Build(map[string]*archive.Trip{"t": tripWithV2("t", detail)}, "", DefaultCodes())
+
+	got := flights["seg-1"].Passengers
+	if len(got) != 2 {
+		t.Fatalf("got %d passengers, want the account user and the short guest", len(got))
+	}
+	if deref(got[1].GuestName) != "Kim Companion" {
+		t.Errorf("guest = %q, want Kim Companion", deref(got[1].GuestName))
+	}
+}
