@@ -99,6 +99,29 @@ func (c *Client) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// RefusedField returns the name of the field that AirTrail refused, and an
+// empty string for any other failure.
+//
+// AirTrail resolves an airline and an aircraft type by ICAO code alone, and
+// it refuses the whole flight when its own table holds no such code. The
+// flight is worth more than the field, so the sync sends it again without
+// the field that AirTrail named.
+func RefusedField(err error) string {
+	var flightErr *FlightError
+	if !errors.As(err, &flightErr) {
+		return ""
+	}
+	message := strings.ToLower(flightErr.Message)
+	switch {
+	case strings.Contains(message, "invalid airline"):
+		return "airline"
+	case strings.Contains(message, "invalid aircraft"):
+		return "aircraft"
+	default:
+		return ""
+	}
+}
+
 // isMissing reports whether err says that AirTrail holds no flight of the
 // id that the request named. AirTrail answers that with the message "Flight
 // not found", and it gives no separate error code, so the message is the

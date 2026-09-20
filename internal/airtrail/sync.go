@@ -56,7 +56,7 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 			flight.ID = known.ID
 		}
 
-		id, err := client.Save(ctx, flight)
+		id, dropped, err := save(ctx, client, flight)
 		var authErr *AuthError
 		if errors.As(err, &authErr) {
 			return result, warnings, err
@@ -67,10 +67,15 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 			// no id. Every other failure keeps the id: a retry with no id
 			// would add a second copy of a flight that is still there.
 			flight.ID = 0
-			id, err = client.Save(ctx, flight)
+			var second []string
+			id, second, err = save(ctx, client, flight)
+			dropped = append(dropped, second...)
 			if errors.As(err, &authErr) {
 				return result, warnings, err
 			}
+		}
+		for _, field := range dropped {
+			warnings = append(warnings, fmt.Sprintf("segment %s: AirTrail holds no such %s, the flight goes without it", uuid, field))
 		}
 		if err != nil {
 			result.Failed++
@@ -122,6 +127,40 @@ func Sync(ctx context.Context, client *Client, dir string, wanted map[string]Fli
 	}
 	sort.Strings(warnings)
 	return result, warnings, nil
+}
+
+// save writes one flight, and sends it again without a field that AirTrail
+// refuses. It returns the AirTrail flight id and the name of each field it
+// dropped.
+//
+// AirTrail refuses the whole flight when its own table holds no airline or
+// no aircraft of the code that the flight carries, so a code that this
+// exporter knows and that instance does not would lose the flight. A flight
+// with no aircraft is worth more than no flight at all.
+func save(ctx context.Context, client *Client, flight Flight) (int64, []string, error) {
+	var dropped []string
+	for {
+		id, err := client.Save(ctx, flight)
+		if err == nil {
+			return id, dropped, nil
+		}
+		switch RefusedField(err) {
+		case "airline":
+			if flight.Airline == nil {
+				return 0, dropped, err
+			}
+			dropped = append(dropped, "airline "+*flight.Airline)
+			flight.Airline = nil
+		case "aircraft":
+			if flight.Aircraft == nil {
+				return 0, dropped, err
+			}
+			dropped = append(dropped, "aircraft "+*flight.Aircraft)
+			flight.Aircraft = nil
+		default:
+			return 0, dropped, err
+		}
+	}
 }
 
 // sortedKeys returns the keys of flights in order, so a run always writes in

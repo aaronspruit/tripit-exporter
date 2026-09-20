@@ -21,6 +21,7 @@ type Server struct {
 	flights  map[int64]map[string]any
 	nextID   int64
 	failFrom map[string]int
+	known    map[string]map[string]bool
 	rejects  bool
 	saves    int
 	deletes  int
@@ -32,6 +33,7 @@ func New() *Server {
 		flights:  make(map[int64]map[string]any),
 		nextID:   1,
 		failFrom: make(map[string]int),
+		known:    make(map[string]map[string]bool),
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
@@ -51,6 +53,20 @@ func (s *Server) FailFlight(from string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failFrom[from] = status
+}
+
+// Hold makes the server accept one code of a field, and refuse every other
+// code of that field the way AirTrail refuses a code its own table does not
+// hold: it rejects the whole flight, and not the field alone. A field that
+// Hold never names accepts every code.
+func (s *Server) Hold(field string, codes ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := make(map[string]bool, len(codes))
+	for _, code := range codes {
+		held[code] = true
+	}
+	s.known[field] = held
 }
 
 // Flights returns the saved flights, in id order.
@@ -109,6 +125,18 @@ func (s *Server) save(w http.ResponseWriter, body map[string]any) {
 	from, _ := body["from"].(string)
 	if status, fail := s.failFrom[from]; fail {
 		write(w, status, map[string]any{"success": false, "message": "Invalid departure airport"})
+		return
+	}
+	for _, field := range []string{"airline", "aircraft"} {
+		held, checked := s.known[field]
+		code, sent := body[field].(string)
+		if !checked || !sent || held[code] {
+			continue
+		}
+		write(w, http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"message": "Invalid " + field,
+		})
 		return
 	}
 

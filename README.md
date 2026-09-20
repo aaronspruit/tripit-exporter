@@ -240,6 +240,11 @@ The exporter never guesses, because AirTrail accepts a wrong airline or a
 wrong aircraft without a word. An airport needs no table: the AirTrail API
 accepts an IATA airport code.
 
+AirTrail refuses a whole flight that carries a code its own tables do not
+hold. The sync therefore sends that flight again without the field that
+AirTrail named, and writes a warning. A flight with no aircraft is worth more
+than no flight at all.
+
 A flight that AirTrail refuses makes a warning and no state entry, so the
 next run tries it again. Only a rejected API key stops the run.
 

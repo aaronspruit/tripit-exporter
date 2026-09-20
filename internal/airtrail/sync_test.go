@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aaronspruit/tripit-exporter/internal/airtrailtest"
@@ -325,5 +326,115 @@ func TestSyncDoesNotDuplicateOnAFailedUpdate(t *testing.T) {
 	// same update again.
 	if got := readState(t, dir).Flights["seg-1"]; got.ID != 1 || got.Hash != flight("SEA", "PDX", "2026-01-02T08:00:00-08:00").Hash() {
 		t.Errorf("state holds %+v, want the entry of the first run", got)
+	}
+}
+
+// withCodes adds an airline and an aircraft to a wanted flight.
+func withCodes(f Flight, airline, aircraft string) Flight {
+	f.Airline = &airline
+	f.Aircraft = &aircraft
+	return f
+}
+
+// TestSyncSendsTheFlightAgainWithoutARefusedCode covers a code that this
+// exporter holds and the AirTrail instance does not. AirTrail refuses the
+// whole flight, so the sync drops the field and keeps the flight.
+func TestSyncSendsTheFlightAgainWithoutARefusedCode(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	server.Hold("aircraft", "B738")
+	wanted := map[string]Flight{
+		"seg-1": withCodes(flight("SEA", "PDX", "2026-01-02T08:00:00-08:00"), "ASA", "B39M"),
+	}
+
+	result, warnings, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("the run stopped: %v", err)
+	}
+	if result.Added != 1 || result.Failed != 0 {
+		t.Fatalf("%+v, want one added and none failed", result)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "aircraft B39M") {
+		t.Errorf("got warnings %v, want one naming aircraft B39M", warnings)
+	}
+
+	flights := server.Flights()
+	if len(flights) != 1 {
+		t.Fatalf("got %d flights, want 1", len(flights))
+	}
+	if flights[0]["aircraft"] != nil {
+		t.Errorf("aircraft = %v, want it dropped", flights[0]["aircraft"])
+	}
+	if flights[0]["airline"] != "ASA" {
+		t.Errorf("airline = %v, want ASA kept", flights[0]["airline"])
+	}
+}
+
+// TestSyncDropsBothRefusedCodes covers a flight whose airline and aircraft
+// are both absent from the instance.
+func TestSyncDropsBothRefusedCodes(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	server.Hold("airline", "UAL")
+	server.Hold("aircraft", "B738")
+	wanted := map[string]Flight{
+		"seg-1": withCodes(flight("SEA", "PDX", "2026-01-02T08:00:00-08:00"), "ASA", "B39M"),
+	}
+
+	result, warnings, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("the run stopped: %v", err)
+	}
+	if result.Added != 1 {
+		t.Fatalf("%+v, want one added", result)
+	}
+	if len(warnings) != 2 {
+		t.Errorf("got warnings %v, want two", warnings)
+	}
+	flights := server.Flights()
+	if flights[0]["airline"] != nil || flights[0]["aircraft"] != nil {
+		t.Errorf("flight = %v, want no airline and no aircraft", flights[0])
+	}
+}
+
+// TestSyncHashStaysWholeAfterADroppedCode proves that the state holds the
+// hash of what TripIt gives, and not of the body that AirTrail accepted. The
+// next run therefore sends nothing, instead of trying the refused code again
+// on every run.
+func TestSyncHashStaysWholeAfterADroppedCode(t *testing.T) {
+	server, client, dir := syncFixture(t)
+	server.Hold("aircraft", "B738")
+	wanted := map[string]Flight{
+		"seg-1": withCodes(flight("SEA", "PDX", "2026-01-02T08:00:00-08:00"), "ASA", "B39M"),
+	}
+	if _, _, err := Sync(context.Background(), client, dir, wanted, Options{}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	result, _, err := Sync(context.Background(), client, dir, wanted, Options{})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if result.Unchanged != 1 {
+		t.Errorf("%+v, want one unchanged", result)
+	}
+	if saves, _ := server.Counts(); saves != 2 {
+		t.Errorf("got %d saves, want 2: one refused and one accepted, then nothing", saves)
+	}
+}
+
+func TestRefusedField(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{&FlightError{Status: 500, Message: "Invalid airline"}, "airline"},
+		{&FlightError{Status: 500, Message: "Invalid aircraft"}, "aircraft"},
+		{&FlightError{Status: 400, Message: "Arrival must be after departure"}, ""},
+		{&NotFoundError{ID: 1}, ""},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := RefusedField(c.err); got != c.want {
+			t.Errorf("RefusedField(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }

@@ -233,6 +233,15 @@ purpose: AirTrail accepts a wrong aircraft without a word, so a guess would be
 invisible. An airport needs no table, because the save endpoint resolves an
 airport by ICAO or by IATA.
 
+`airlines.json` and `aircraft.json` of the AirTrail repository are written by
+hand, and no upstream feeds them, so an instance can hold a different set of
+codes from this table. The endpoint answers a code that its own table does
+not hold with `apiError('Invalid airline')`, which refuses the whole flight.
+`save` in `sync.go` therefore reads `RefusedField` and sends the flight again
+without the field that AirTrail named. The state keeps the hash of the whole
+TripIt body, so the next run sends nothing rather than trying the refused
+code again.
+
 ## Testing notes
 
 `internal/testutil.Golden(t, name, got)` compares `got` with
