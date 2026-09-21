@@ -425,3 +425,65 @@ func TestSessionValues(t *testing.T) {
 		})
 	}
 }
+
+// tripFileExists reports whether the archive holds both files of uuid.
+func tripFileExists(t *testing.T, dir, uuid string) bool {
+	t.Helper()
+	_, jsonErr := os.Stat(filepath.Join(dir, "trips", uuid+".json"))
+	_, icsErr := os.Stat(filepath.Join(dir, "trips", uuid+".ics"))
+	if os.IsNotExist(jsonErr) && os.IsNotExist(icsErr) {
+		return false
+	}
+	if jsonErr != nil || icsErr != nil {
+		t.Fatalf("trip %s: json err = %v, ics err = %v", uuid, jsonErr, icsErr)
+	}
+	return true
+}
+
+func TestRefreshDeletesEachPastTripThatTripItNoLongerHolds(t *testing.T) {
+	s := newRefreshServer(t)
+	dir := t.TempDir()
+	// testNow is 2026-06-20. trip-1 comes from testCalendar and ends
+	// 2026-06-19, inside the feed window.
+	archiveTrips(t, dir, map[string]string{
+		"trip-kept":   "2026-01-11",
+		"trip-gone":   "2026-01-10",
+		"trip-coming": "2026-12-01",
+	})
+	setListedTrips(s, "trip-kept")
+
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, refreshEnv(s, dir), strings.NewReader(""), &stdout, &stderr, testNow); code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+
+	if tripFileExists(t, dir, "trip-gone") {
+		t.Fatal("trip-gone is absent from the trip list, so its files must be gone")
+	}
+	for _, uuid := range []string{"trip-kept", "trip-coming", "trip-1"} {
+		if !tripFileExists(t, dir, uuid) {
+			t.Fatalf("trip %s must stay in the archive", uuid)
+		}
+	}
+	if !strings.Contains(stdout.String(), "1 trips, 0 to refresh, 1 deleted at TripIt") {
+		t.Fatalf("stdout = %q, want the deleted count", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "trip trip-gone is gone from TripIt") {
+		t.Fatalf("stdout = %q, want the line that names the deleted trip", stdout.String())
+	}
+}
+
+func TestRefreshEmptyTripListDeletesNothing(t *testing.T) {
+	s := newRefreshServer(t)
+	dir := t.TempDir()
+	archiveTrips(t, dir, map[string]string{"trip-old": "2026-01-10"})
+	s.SetTrips(nil)
+
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, refreshEnv(s, dir), strings.NewReader(""), &stdout, &stderr, testNow); code != 0 {
+		t.Fatalf("exit code = %d, want 0, stderr = %q", code, stderr.String())
+	}
+	if !tripFileExists(t, dir, "trip-old") {
+		t.Fatal("an empty trip list must delete nothing")
+	}
+}

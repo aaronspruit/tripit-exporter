@@ -228,8 +228,14 @@ func (c *Client) ListTrips(ctx context.Context, query string) ([]json.RawMessage
 		}
 		all = append(all, NormalizeList(resp.Trip)...)
 
+		// A list that stops early looks like an account that lost trips, and
+		// the refresh deletes a trip that the list does not hold, so a
+		// max_page that does not parse is an error and not the last page.
 		maxPage, err := intField(resp.MaxPage)
-		if err != nil || page >= maxPage {
+		if err != nil {
+			return nil, fmt.Errorf("tripitweb: trip list page %d holds no max_page", page)
+		}
+		if page >= maxPage {
 			break
 		}
 	}

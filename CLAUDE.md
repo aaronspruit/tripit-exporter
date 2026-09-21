@@ -125,7 +125,8 @@ not hold those, so `in_feed: false` keeps them safe from deletion.
 A trip absent from a fetch stays in the archive unless it ended more than 83
 days before the fetch, which the 7-day margin around the 90-day feed window
 allows for. A kept trip is a visible mistake that a person can correct; a
-deleted trip is a silent loss.
+deleted trip is a silent loss. `archive.WithinFeedWindow` holds that rule,
+and the refresh reads it to find the trips that the feed does not decide.
 
 Every write goes to a temporary file in the same folder, then `os.Rename`,
 and only when the SHA-256 of the new content differs from the file on disk.
@@ -201,6 +202,16 @@ events or `empty_download: true` gets no download, because the feed holds
 the events of each trip that ended in the last 83 days. `sameV2` ignores
 the top-level `timestamp` of a detail response, which changes with each
 request, so an unchanged trip writes no file.
+
+`pruneDeleted` removes an archived trip that the trip list does not hold,
+because the feed alone cannot show that a person deleted an older trip. It
+deletes only a trip that ended before the run date and that is outside the
+feed window: the upcoming half of the list asks for the trips of this
+traveler alone, so a trip that another traveler shares and that has not
+ended yet is absent from a list that still exists, and a trip inside the
+window belongs to `Merge`. An empty list deletes nothing, and `ListTrips`
+makes a page without `max_page` an error, because a list that stops early
+looks the same as an account that lost trips.
 
 `TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`
 calls. It is empty in production; a test sets it to a fake server's URL.

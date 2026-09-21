@@ -118,7 +118,7 @@ func runRefresh(env map[string]string, outputDir string, cfg refreshConfig, stdo
 	cutoff := now.AddDate(0, 0, -cfg.lookbackDays).Format("2006-01-02")
 	code := syncTrips(ctx, client, outputDir, "refresh", func(trip *archive.Trip) bool {
 		return needsBackfill(trip) || trip.End == "" || trip.End >= cutoff
-	}, stdout, stderr)
+	}, stdout, stderr, now)
 
 	if err := saveSession(outputDir, client); err != nil {
 		_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
