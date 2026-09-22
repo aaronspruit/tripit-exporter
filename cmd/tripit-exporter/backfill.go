@@ -88,9 +88,13 @@ func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb st
 	listed := make(map[string]bool, len(trips))
 	var todo []string
 	for _, raw := range trips {
+		// pruneDeleted reads a trip that listed does not hold as a trip that
+		// a person deleted, so an item with no UUID would delete the files
+		// and the AirTrail flights of a trip that still exists.
 		uuid := tripitweb.UUIDField(raw)
 		if uuid == "" {
-			continue
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: the trip list holds an item with no uuid, so the %s stops before it deletes a trip that TripIt still has\n", verb)
+			return 2
 		}
 		listed[uuid] = true
 		if !archive.ValidTripUUID(uuid) {

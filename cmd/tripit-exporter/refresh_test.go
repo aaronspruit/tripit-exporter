@@ -487,3 +487,21 @@ func TestRefreshEmptyTripListDeletesNothing(t *testing.T) {
 		t.Fatal("an empty trip list must delete nothing")
 	}
 }
+
+func TestRefreshTripListItemWithoutUUIDStopsTheRun(t *testing.T) {
+	s := newRefreshServer(t)
+	dir := t.TempDir()
+	archiveTrips(t, dir, map[string]string{"trip-old": "2026-01-10"})
+	s.SetTrips([]json.RawMessage{json.RawMessage(`{"display_name":"an item with no uuid"}`)})
+
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, refreshEnv(s, dir), strings.NewReader(""), &stdout, &stderr, testNow); code != 2 {
+		t.Fatalf("exit code = %d, want 2, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no uuid") {
+		t.Fatalf("stderr = %q, want it to name the item with no uuid", stderr.String())
+	}
+	if !tripFileExists(t, dir, "trip-old") {
+		t.Fatal("a trip list that the run does not trust must delete nothing")
+	}
+}

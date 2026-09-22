@@ -209,9 +209,10 @@ deletes only a trip that ended before the run date and that is outside the
 feed window: the upcoming half of the list asks for the trips of this
 traveler alone, so a trip that another traveler shares and that has not
 ended yet is absent from a list that still exists, and a trip inside the
-window belongs to `Merge`. An empty list deletes nothing, and `ListTrips`
-makes a page without `max_page` an error, because a list that stops early
-looks the same as an account that lost trips.
+window belongs to `Merge`. An empty list deletes nothing, a list item with
+no `uuid` exits with `2`, and `ListTrips` makes a page without `max_page` an
+error, because a list that stops early or loses an item looks the same as an
+account that lost trips.
 
 `TRIPIT_WEB_BASE_URL` replaces the TripIt host that `internal/tripitweb`
 calls. It is empty in production; a test sets it to a fake server's URL.
