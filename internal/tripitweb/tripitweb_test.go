@@ -58,6 +58,18 @@ func TestDedupeByUUIDKeepsOneOfEachSharedPlan(t *testing.T) {
 	}
 }
 
+func TestListTripsWithoutMaxPageIsAnError(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Trip":[{"uuid":"trip-1"}]}`))
+	}))
+	defer s.Close()
+
+	client := &Client{BaseURL: s.URL, Sleep: func(time.Duration) {}}
+	if _, err := client.ListTrips(context.Background(), "past=true"); err == nil {
+		t.Fatal("ListTrips() = nil error, want an error for a page without max_page")
+	}
+}
+
 func TestListTripsPagesUpToMaxPage(t *testing.T) {
 	s := tripittest.New()
 	defer s.Close()

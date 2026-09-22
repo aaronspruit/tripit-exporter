@@ -179,7 +179,11 @@ func Merge(trips map[string]*Trip, events []ics.Event, now time.Time) []string {
 		if !trip.InFeed {
 			continue
 		}
-		if shouldDeleteAbsentTrip(trip, now) {
+		// A trip inside the feed window that is absent from this fetch was
+		// deleted at TripIt, so the archive deletes it too. A trip outside
+		// the window stays, because the exact edge of the 90-day window is
+		// not certain; the trip list of the refresh deletes that one.
+		if WithinFeedWindow(trip, now) {
 			delete(trips, tripUUID)
 		}
 	}
@@ -289,18 +293,17 @@ func dateValue(raw string) string {
 	return v[0:4] + "-" + v[4:6] + "-" + v[6:8]
 }
 
-// shouldDeleteAbsentTrip applies the window margin rule: a trip that is
-// absent from the feed and ended fewer than 83 days ago was deleted by
-// TripIt, so the archive deletes it too. A trip that ended 83 or more days
-// ago stays, because the exact edge of the 90-day window is not certain,
-// and a kept trip is the error that a person can correct.
-func shouldDeleteAbsentTrip(trip *Trip, now time.Time) bool {
+// WithinFeedWindow reports whether the feed still holds trip: its end is
+// fewer than 83 days before now, which is the 90-day feed window less the
+// 7-day margin. Inside this window the feed decides whether a trip stays,
+// because Merge deletes a trip that leaves a fetch. Outside it, the feed
+// holds no trip, so the feed says nothing about one.
+func WithinFeedWindow(trip *Trip, now time.Time) bool {
 	end, err := time.Parse("2006-01-02", trip.End)
 	if err != nil {
 		return false
 	}
-	daysSinceEnd := now.Sub(end)
-	return daysSinceEnd < windowDays-windowMargin
+	return now.Sub(end) < windowDays-windowMargin
 }
 
 // Write writes every trip file, the per-trip ICS files, and the combined
