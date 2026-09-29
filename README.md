@@ -79,8 +79,10 @@ folder:
 
 Each run merges the feed into the archive by event `UID`, and it ignores a
 change to `DTSTAMP` alone. A trip that leaves the 90-day feed window stays in
-the archive. A trip or plan that TripIt deletes is removed from the archive on
-the next run.
+the archive. The run removes a plan that TripIt no longer holds, and a trip
+that TripIt no longer holds and that ended in the last 83 days. An older trip
+that you delete at TripIt leaves the archive on the next run with the JSON
+refresh on, because only the TripIt trip list holds that fact.
 
 ## Part 2: the full history
 

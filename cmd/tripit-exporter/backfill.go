@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ func runBackfill(env map[string]string, stdin io.Reader, stdout, stderr io.Write
 		return backfillExitCode(err, stderr)
 	}
 
-	return syncTrips(ctx, client, outputDir, "backfill", needsBackfill, stdout, stderr)
+	return syncTrips(ctx, client, outputDir, "backfill", needsBackfill, stdout, stderr, now)
 }
 
 // newWebClient returns a web API v2 client that sends cookie and writes its
@@ -71,7 +72,7 @@ func needsBackfill(trip *archive.Trip) bool {
 // selects. want gets nil for a trip that the archive does not hold. verb
 // names the work in the progress lines. It writes the archive after each
 // trip, and returns the exit code.
-func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb string, want func(*archive.Trip) bool, stdout, stderr io.Writer) int {
+func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb string, want func(*archive.Trip) bool, stdout, stderr io.Writer, now time.Time) int {
 	_, _ = fmt.Fprintln(stdout, "tripit-exporter: listing the trips")
 	trips, err := listAllTrips(ctx, client)
 	if err != nil {
@@ -84,12 +85,18 @@ func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb st
 		return 2
 	}
 
+	listed := make(map[string]bool, len(trips))
 	var todo []string
 	for _, raw := range trips {
+		// pruneDeleted reads a trip that listed does not hold as a trip that
+		// a person deleted, so an item with no UUID would delete the files
+		// and the AirTrail flights of a trip that still exists.
 		uuid := tripitweb.UUIDField(raw)
 		if uuid == "" {
-			continue
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: the trip list holds an item with no uuid, so the %s stops before it deletes a trip that TripIt still has\n", verb)
+			return 2
 		}
+		listed[uuid] = true
 		if !archive.ValidTripUUID(uuid) {
 			_, _ = fmt.Fprintf(stderr, "tripit-exporter: warning: trip %q: the UUID is not safe as a file name, so the %s skips it\n", uuid, verb)
 			continue
@@ -99,7 +106,17 @@ func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb st
 		}
 		todo = append(todo, uuid)
 	}
-	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to %s\n", len(trips), len(todo), verb)
+	deleted := pruneDeleted(archived, listed, now)
+	_, _ = fmt.Fprintf(stdout, "tripit-exporter: %d trips, %d to %s, %d deleted at TripIt\n", len(trips), len(todo), verb, len(deleted))
+	for _, uuid := range deleted {
+		_, _ = fmt.Fprintf(stdout, "tripit-exporter: trip %s is gone from TripIt, so the archive drops it\n", uuid)
+	}
+	if len(deleted) > 0 {
+		if err := archive.Write(outputDir, archived); err != nil {
+			_, _ = fmt.Fprintf(stderr, "tripit-exporter: %v\n", err)
+			return 2
+		}
+	}
 
 	for i, uuid := range todo {
 		_, _ = fmt.Fprintf(stdout, "tripit-exporter: trip %d of %d: %s\n", i+1, len(todo), uuid)
@@ -118,6 +135,42 @@ func syncTrips(ctx context.Context, client *tripitweb.Client, outputDir, verb st
 	}
 	_, _ = fmt.Fprintln(stdout, "tripit-exporter: done")
 	return 0
+}
+
+// pruneDeleted removes from archived each trip that a person deleted at
+// TripIt, and returns the UUID of each one. listed holds the UUID of every
+// trip that the account still has.
+//
+// A trip is deleted only when it ended before now. The trip list asks for
+// every past trip of every traveler, so it holds each past trip that still
+// exists; the upcoming half asks for the trips of this traveler alone, so a
+// trip that another traveler shares and that has not ended yet is absent
+// from the list although it exists.
+//
+// A trip inside the feed window also stays, because Merge owns that trip
+// and deletes it as soon as it leaves a fetch.
+//
+// An empty list deletes nothing, because a list that holds no trip is a
+// failed read more probably than an empty account.
+func pruneDeleted(archived map[string]*archive.Trip, listed map[string]bool, now time.Time) []string {
+	if len(listed) == 0 {
+		return nil
+	}
+	today := now.Format("2006-01-02")
+
+	var deleted []string
+	for uuid, trip := range archived {
+		if listed[uuid] || trip.End == "" || trip.End >= today {
+			continue
+		}
+		if archive.WithinFeedWindow(trip, now) {
+			continue
+		}
+		delete(archived, uuid)
+		deleted = append(deleted, uuid)
+	}
+	sort.Strings(deleted)
+	return deleted
 }
 
 // boolEnv reports whether an environment variable such as TRIPIT_VERBOSE is
